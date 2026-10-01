@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "name": "国际服中文界面",
+  "reference_size": [
+    1280,
+    720
+  ],
+  "states": [
+    {
+      "name": "prepare",
+      "label": "已选关卡 · 出击准备",
+      "tap": [
+        0.874,
+        0.824
+      ],
+      "templates": [
+        {
+          "name": "button",
+          "path": "prepare_button.png",
+          "search_roi": [
+            0.76,
+            0.75,
+            0.995,
+            0.91
+          ],
+          "threshold": 0.78,
+          "method": "gray"
+        },
+        {
+          "name": "header",
+          "path": "prepare_header.png",
+          "search_roi": [
+            0.07,
+            0.0,
+            0.42,
+            0.12
+          ],
+          "threshold": 0.72,
+          "method": "gray"
+        }
+      ]
+    },
+    {
+      "name": "sortie",
+      "label": "出击准备 · 出击",
+      "tap": [
+        0.874,
+        0.916
+      ],
+      "templates": [
+        {
+          "name": "button",
+          "path": "sortie_button.png",
+          "search_roi": [
+            0.76,
+            0.84,
+            0.995,
+            0.985
+          ],
+          "threshold": 0.77,
+          "method": "gray"
+        },
+        {
+          "name": "header",
+          "path": "sortie_header.png",
+          "search_roi": [
+            0.07,
+            0.0,
+            0.43,
+            0.12
+          ],
+          "threshold": 0.72,
+          "method": "gray"
+        }
+      ]
+    },
+    {
+      "name": "battle_intro",
+      "label": "战斗开始 · TAP TO NEXT",
+      "tap": [
+        0.5,
+        0.9
+      ],
+      "templates": [
+        {
+          "name": "button",
+          "path": "battle_intro_button.png",
+          "search_roi": [
+            0.32,
+            0.83,
+            0.7,
+            0.96
+          ],
+          "threshold": 0.76,
+          "method": "gray",
+          "allow_pulse": true
+        },
+        {
+          "name": "header",
+          "path": "battle_intro_header.png",
+          "search_roi": [
+            0.72,
+            0.0,
+            0.88,
+            0.12
+          ],
+          "threshold": 0.72,
+          "method": "gray"
+        }
+      ]
+    },
+    {
+      "name": "score",
+      "label": "战斗完成 · 继续",
+      "tap": [
+        0.873,
+        0.916
+      ],
+      "templates": [
+        {
+          "name": "button",
+          "path": "score_button.png",
+          "search_roi": [
+            0.76,
+            0.83,
+            0.995,
+            0.985
+          ],
+          "threshold": 0.78,
+          "method": "gray"
+        },
+        {
+          "name": "header",
+          "path": "score_header.png",
+          "search_roi": [
+            0.025,
+            0.27,
+            0.25,
+            0.37
+          ],
+          "threshold": 0.72,
+          "method": "gray"
+        }
+      ]
+    },
+    {
+      "name": "experience",
+      "label": "经验结算 · 继续",
+      "tap": [
+        0.873,
+        0.916
+      ],
+      "templates": [
+        {
+          "name": "button",
+          "path": "experience_button.png",
+          "search_roi": [
+            0.76,
+            0.83,
+            0.995,
+            0.985
+          ],
+          "threshold": 0.78,
+          "method": "gray"
+        },
+        {
+          "name": "header",
+          "path": "experience_header.png",
+          "search_roi": [
+            0.025,
+            0.86,
+            0.35,
+            0.99
+          ],
+          "threshold": 0.72,
+          "method": "gray"
+        }
+      ]
+    },
+    {
+      "name": "reward",
+      "label": "战斗奖励 · 再次出击",
+      "tap": [
+        0.671,
+        0.916
+      ],
+      "templates": [
+        {
+          "name": "button",
+          "path": "reward_button.png",
+          "search_roi": [
+            0.54,
+            0.83,
+            0.8,
+            0.985
+          ],
+          "threshold": 0.78,
+          "method": "gray"
+        },
+        {
+          "name": "header",
+          "path": "reward_header.png",
+          "search_roi": [
+            0.025,
+            0.09,
+            0.21,
+            0.22
+          ],
+          "threshold": 0.7,
+          "method": "gray"
+        }
+      ]
+    },
+    {
+      "name": "battle",
+      "label": "正在自动战斗 · 不发送操作",
+      "tap": null,
+      "templates": [
+        {
+          "name": "auto",
+          "path": "battle_auto.png",
+          "search_roi": [
+            0.72,
+            0.0,
+            0.88,
+            0.1
+          ],
+          "threshold": 0.74,
+          "method": "gray"
+        },
+        {
+          "name": "turn",
+          "path": "battle_turn.png",
+          "search_roi": [
+            0.015,
+            0.045,
+            0.18,
+            0.13
+          ],
+          "threshold": 0.72,
+          "method": "gray"
+        }
+      ]
+    }
+  ]
+}
