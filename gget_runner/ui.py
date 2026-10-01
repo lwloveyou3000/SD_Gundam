@@ -52,7 +52,7 @@ class RunnerWindow:
         self.rounds = tk.StringVar(root, str(saved.rounds))
         self.infinite = tk.BooleanVar(root, saved.infinite)
         self.status = tk.StringVar(root, "待开始")
-        self.page = tk.StringVar(root, "尚未检查游戏页面")
+        self.page = tk.StringVar(root, "等待开始挑战")
         self.count = tk.StringVar(root, "已完成 0 次")
         self.coin_total = tk.StringVar(root, "金币累计：0")
         self.loot_rounds = tk.StringVar(root, "统计轮数：0")
@@ -63,108 +63,98 @@ class RunnerWindow:
         self._update_controls()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(80, self._drain_events)
-        self._log("请先开启游戏 AUTO，手动选择关卡，再刷新设备并检查页面。")
+        self._log("请先开启游戏 AUTO，手动选择关卡，再刷新设备并开始。")
 
     def _build(self) -> None:
         root = self.root
         root.title("SD 高达 · 关卡自动挑战")
-        root.geometry("1120x900")
-        root.minsize(950, 700)
+        root.geometry("900x680")
+        root.minsize(820, 580)
         root.configure(bg="#f3f5f8")
-        root.option_add("*Font", ("Microsoft YaHei", 10))
+        root.option_add("*Font", ("Microsoft YaHei", 9))
         style = ttk.Style(root)
         style.theme_use("clam")
         style.configure("TFrame", background="#f3f5f8")
-        style.configure("TLabel", background="#f3f5f8", foreground="#273447", font=("Microsoft YaHei", 10))
-        style.configure("Heading.TLabel", font=("Microsoft YaHei", 20, "bold"), foreground="#17365d")
+        style.configure("TLabel", background="#f3f5f8", foreground="#273447", font=("Microsoft YaHei", 9))
+        style.configure("Heading.TLabel", font=("Microsoft YaHei", 14, "bold"), foreground="#17365d")
         style.configure("Muted.TLabel", foreground="#65758a")
         style.configure("Hint.TLabel", foreground="#65758a", font=("Microsoft YaHei", 9))
-        style.configure("Metric.TLabel", font=("Microsoft YaHei", 17, "bold"), foreground="#17365d")
-        style.configure("TButton", padding=(13, 8), font=("Microsoft YaHei", 10))
+        style.configure("Metric.TLabel", font=("Microsoft YaHei", 11, "bold"), foreground="#17365d")
+        style.configure("TButton", padding=(6, 3), font=("Microsoft YaHei", 9), width=6)
         style.configure("Primary.TButton", background="#2769b2", foreground="white")
         style.map("Primary.TButton", background=[("active", "#205895"), ("disabled", "#a6b7cb")])
-        style.configure("TCheckbutton", background="#f3f5f8", font=("Microsoft YaHei", 10))
+        style.configure("TCheckbutton", background="#f3f5f8", font=("Microsoft YaHei", 9))
         style.configure("TLabelframe", background="#f3f5f8", bordercolor="#d8e0eb")
-        style.configure("TLabelframe.Label", background="#f3f5f8", foreground="#425572", font=("Microsoft YaHei", 10, "bold"))
-        style.configure("Loot.Treeview", rowheight=60, font=("Microsoft YaHei", 10))
-        body = ttk.Frame(root, padding=(20, 12))
+        style.configure("TLabelframe.Label", background="#f3f5f8", foreground="#425572", font=("Microsoft YaHei", 9, "bold"))
+        style.configure("Loot.Treeview", rowheight=60, font=("Microsoft YaHei", 9))
+        body = ttk.Frame(root, padding=12)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
-        body.rowconfigure(4, weight=1)
-        ttk.Label(body, text="关卡自动挑战", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        hints = ttk.Frame(body)
-        hints.grid(row=1, column=0, sticky="ew", pady=(4, 8))
-        hints.columnconfigure((0, 1), weight=1, uniform="hints")
-        self.start_hint = ttk.Label(hints, text="开启 AUTO 后，从已选关卡、出击准备、TAP TO NEXT 或自动战斗页面启动。未知弹窗请人工处理。",
-                                    style="Hint.TLabel", wraplength=520)
-        self.start_hint.grid(row=0, column=0, sticky="nw", padx=(0, 8))
-        self.runtime_hint = ttk.Label(hints, text="运行期间请保持游戏在模拟器前台；更换关卡前先停止。体力不足或其他提示请手动处理。",
-                                      style="Hint.TLabel", wraplength=520)
-        self.runtime_hint.grid(row=0, column=1, sticky="nw", padx=(8, 0))
-        def wrap_hints(event):
-            width = max(1, event.width // 2 - 16)
-            if int(self.start_hint.cget("wraplength")) != width:
-                self.start_hint.configure(wraplength=width)
-                self.runtime_hint.configure(wraplength=width)
-        hints.bind("<Configure>", wrap_hints)
-
-        setup = ttk.LabelFrame(body, text="连接与挑战次数", padding=10)
-        setup.grid(row=2, column=0, sticky="ew")
-        setup.columnconfigure(1, weight=1)
-        ttk.Label(setup, text="ADB 程序").grid(row=0, column=0, sticky="w", padx=(0, 12))
-        self.path_entry = ttk.Entry(setup, textvariable=self.adb_path)
-        self.path_entry.grid(row=0, column=1, columnspan=3, sticky="ew", padx=(0, 10))
-        self.browse_button = ttk.Button(setup, text="浏览…", command=self._browse)
-        self.browse_button.grid(row=0, column=4, sticky="ew")
-        ttk.Label(setup, text="模拟器设备").grid(row=1, column=0, sticky="w", pady=(10, 0))
-        self.device_combo = ttk.Combobox(setup, textvariable=self.device, state="readonly",
-                                         values=(self.device.get(),) if self.device.get() else ())
-        self.device_combo.grid(row=1, column=1, columnspan=3, sticky="ew", padx=(0, 10), pady=(10, 0))
-        self.refresh_button = ttk.Button(setup, text="刷新设备", command=self._refresh_devices)
-        self.refresh_button.grid(row=1, column=4, sticky="ew", pady=(10, 0))
-        ttk.Label(setup, text="完成次数").grid(row=2, column=0, sticky="w", pady=(12, 0))
-        options = ttk.Frame(setup)
-        options.grid(row=2, column=1, columnspan=4, sticky="w", pady=(12, 0))
-        self.rounds_entry = ttk.Spinbox(options, from_=1, to=MAX_ROUNDS, width=9, textvariable=self.rounds)
-        self.rounds_entry.pack(side="left")
-        ttk.Label(options, text="次", padding=(7, 0, 20, 0)).pack(side="left")
-        self.infinite_check = ttk.Checkbutton(options, text="无限挑战（直到手动停止）", variable=self.infinite,
-                                             command=self._mode_changed)
-        self.infinite_check.pack(side="left")
-        ttk.Label(options, text="有限次数完成后停在奖励页", style="Muted.TLabel", padding=(20, 0, 0, 0)).pack(side="left")
-
-        controls = ttk.Frame(body, padding=(0, 8, 0, 8))
-        controls.grid(row=3, column=0, sticky="ew")
-        self.start_button = ttk.Button(controls, text="开始挑战", style="Primary.TButton", command=self._start)
+        body.rowconfigure(2, weight=1)
+        header = ttk.Frame(body)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="关卡自动挑战", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
+        controls = ttk.Frame(header)
+        controls.grid(row=0, column=1, sticky="e")
+        self.start_button = ttk.Button(controls, text="开始", style="Primary.TButton", command=self._start)
         self.start_button.pack(side="left")
         self.pause_button = ttk.Button(controls, text="暂停", command=lambda: self._control("pause"))
-        self.pause_button.pack(side="left", padx=(8, 0))
+        self.pause_button.pack(side="left", padx=(4, 0))
         self.resume_button = ttk.Button(controls, text="继续", command=lambda: self._control("resume"))
-        self.resume_button.pack(side="left", padx=(8, 0))
+        self.resume_button.pack(side="left", padx=(4, 0))
         self.stop_button = ttk.Button(controls, text="停止", command=self._stop)
-        self.stop_button.pack(side="left", padx=(8, 0))
-        self.read_button = ttk.Button(controls, text="检查页面（不点击）", command=self._read_screen)
-        self.read_button.pack(side="right")
+        self.stop_button.pack(side="left", padx=(4, 0))
+        self.runtime_hint = ttk.Label(header, text="运行期间请保持游戏在模拟器前台；更换关卡前先停止。体力不足或其他提示请手动处理。",
+                                      style="Hint.TLabel", wraplength=870)
+        self.runtime_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        header.bind("<Configure>", lambda event: self.runtime_hint.configure(wraplength=max(1, event.width)))
+
+        setup = ttk.LabelFrame(body, text="连接与挑战次数", padding=8)
+        setup.grid(row=1, column=0, sticky="ew")
+        setup.columnconfigure(1, weight=1)
+        ttk.Label(setup, text="ADB 程序").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.path_entry = ttk.Entry(setup, textvariable=self.adb_path)
+        self.path_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        self.browse_button = ttk.Button(setup, text="浏览", command=self._browse)
+        self.browse_button.grid(row=0, column=2, sticky="ew")
+        options = ttk.Frame(setup)
+        options.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        options.columnconfigure(1, weight=1)
+        ttk.Label(options, text="模拟器").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.device_combo = ttk.Combobox(options, textvariable=self.device, state="readonly", width=18,
+                                         values=(self.device.get(),) if self.device.get() else ())
+        self.device_combo.grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        self.refresh_button = ttk.Button(options, text="刷新", command=self._refresh_devices)
+        self.refresh_button.grid(row=0, column=2)
+        ttk.Label(options, text="次数").grid(row=0, column=3, padx=(12, 6))
+        self.rounds_entry = ttk.Spinbox(options, from_=1, to=MAX_ROUNDS, width=6, textvariable=self.rounds)
+        self.rounds_entry.grid(row=0, column=4)
+        ttk.Label(options, text="次").grid(row=0, column=5, padx=(4, 8))
+        self.infinite_check = ttk.Checkbutton(options, text="无限循环", variable=self.infinite,
+                                             command=self._mode_changed)
+        self.infinite_check.grid(row=0, column=6, sticky="w")
+        ttk.Label(options, text="有限次数停在奖励页", style="Muted.TLabel").grid(row=0, column=7, padx=(12, 0))
 
         content = ttk.Frame(body)
-        content.grid(row=4, column=0, sticky="nsew")
+        content.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
         content.columnconfigure(0, weight=3)
         content.columnconfigure(1, weight=2)
         content.rowconfigure(0, weight=1)
-        loot_panel = ttk.LabelFrame(content, text="战利品统计", padding=10)
-        loot_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        loot_panel = ttk.LabelFrame(content, text="战利品统计", padding=8)
+        loot_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         loot_panel.columnconfigure(0, weight=1)
         loot_panel.rowconfigure(1, weight=1)
         metrics = ttk.Frame(loot_panel)
-        metrics.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        metrics.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         for value in (self.coin_total, self.loot_rounds, self.warning_rounds):
-            ttk.Label(metrics, textvariable=value).pack(side="left", padx=(0, 18))
+            ttk.Label(metrics, textvariable=value).pack(side="left", padx=(0, 12))
         self.loot_tree = ttk.Treeview(loot_panel, columns=("name", "last", "total", "rounds"),
                                      show="tree headings", style="Loot.Treeview", height=6)
         self.loot_tree.heading("#0", text="图标")
         self.loot_tree.column("#0", width=68, minwidth=68, stretch=False)
-        for key, title, width in (("name", "名称", 118), ("last", "本轮数量", 90),
-                                   ("total", "累计数量", 100), ("rounds", "出现轮数", 90)):
+        for key, title, width in (("name", "名称", 104), ("last", "本轮数量", 74),
+                                   ("total", "累计数量", 100), ("rounds", "出现轮数", 72)):
             self.loot_tree.heading(key, text=title)
             self.loot_tree.column(key, width=width, minwidth=width, anchor="w" if key == "name" else "center")
         self.loot_tree.grid(row=1, column=0, sticky="nsew")
@@ -172,24 +162,24 @@ class RunnerWindow:
         loot_scroll.grid(row=1, column=1, sticky="ns")
         self.loot_tree.configure(yscrollcommand=loot_scroll.set)
         ttk.Label(loot_panel, text="仅统计本次挑战新获得的战利品；无法确认的数量显示「待确认」。",
-                  style="Muted.TLabel", wraplength=510).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+                  style="Muted.TLabel", wraplength=420).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         side = ttk.Frame(content)
         side.grid(row=0, column=1, sticky="nsew")
         side.columnconfigure(0, weight=1)
         side.rowconfigure(1, weight=1)
-        summary = ttk.LabelFrame(side, text="挑战状态", padding=10)
-        summary.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        summary = ttk.LabelFrame(side, text="挑战状态", padding=8)
+        summary.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         ttk.Label(summary, textvariable=self.status, style="Metric.TLabel").pack(anchor="w")
-        ttk.Label(summary, textvariable=self.count, style="Metric.TLabel").pack(anchor="w", pady=(5, 7))
+        ttk.Label(summary, textvariable=self.count, style="Metric.TLabel").pack(anchor="w", pady=(3, 5))
         self.progress = ttk.Progressbar(summary, mode="determinate", maximum=1)
         self.progress.pack(fill="x")
-        ttk.Label(summary, textvariable=self.page, wraplength=340).pack(anchor="w", pady=(8, 0))
-        log_frame = ttk.LabelFrame(side, text="运行记录", padding=8)
+        ttk.Label(summary, textvariable=self.page, wraplength=240).pack(anchor="w", pady=(6, 0))
+        log_frame = ttk.LabelFrame(side, text="运行记录", padding=6)
         log_frame.grid(row=1, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-        self.log_text = tk.Text(log_frame, state="disabled", wrap="word", width=36, height=9,
+        self.log_text = tk.Text(log_frame, state="disabled", wrap="word", width=28, height=9,
                                 font=("Microsoft YaHei", 9), bg="white", fg="#34445b",
                                 relief="flat", padx=8, pady=7)
         self.log_text.grid(row=0, column=0, sticky="nsew")
@@ -266,30 +256,6 @@ class RunnerWindow:
                 self._post("devices", (AdbClient.list_devices(path), preferred))
             except Exception as exc:
                 self._post("utility_error", f"刷新设备失败：{exc}")
-        self._background(work)
-
-    def _read_screen(self) -> None:
-        if self._active or self._utility_busy:
-            return
-        try:
-            settings = self._snapshot(require_device=True, validate_rounds=False)
-        except ValueError as exc:
-            messagebox.showerror("连接设置", str(exc), parent=self.root)
-            return
-        self._utility_busy = True
-        self.status.set("正在检查页面…")
-        self._update_controls()
-        def work():
-            try:
-                adb = AdbClient(settings.adb_path, settings.device)
-                foreground = adb.is_game_foreground()
-                frame = adb.screenshot()
-                detector = ScreenDetector(self.project_root / "assets" / "profiles" / "default")
-                detection = detector.detect(frame)
-                self._persist(settings)
-                self._post("inspection", (detection, foreground))
-            except Exception as exc:
-                self._post("utility_error", f"检查页面失败：{exc}")
         self._background(work)
 
     def _start(self) -> None:
@@ -376,7 +342,6 @@ class RunnerWindow:
         self.device_combo.configure(state="readonly" if idle else "disabled")
         self.rounds_entry.configure(state="normal" if idle and not self.infinite.get() else "disabled")
         self.start_button.configure(state="normal" if idle else "disabled")
-        self.read_button.configure(state="normal" if idle else "disabled")
         controllable = self._active and not self._stopping and not self._control_pending and not self._closing
         self.pause_button.configure(state="normal" if controllable and not self._paused and self._runner is not None else "disabled")
         self.resume_button.configure(state="normal" if controllable and self._paused else "disabled")
@@ -496,17 +461,9 @@ class RunnerWindow:
             self.status.set("设备已连接" if values else "未找到在线设备")
             self._log(f"找到 {len(values)} 台在线设备" + ("；不可用：" + "、".join(unavailable) if unavailable else ""))
             self._update_controls()
-        elif kind == "inspection":
-            detection, foreground = payload
-            label = STATE_LABELS.get(detection.state, "未识别页面")
-            self.page.set("当前页面：" + label)
-            self._utility_busy = False
-            self.status.set("页面已检查" if foreground else "游戏未在前台")
-            self._log(f"只读检查：{label}；识别匹配 {detection.confidence:.0%}；" + ("游戏在前台" if foreground else "请返回游戏并处理弹窗"))
-            self._update_controls()
         elif kind == "utility_error":
             self._utility_busy = False
-            self.status.set("连接或读取失败")
+            self.status.set("连接失败")
             self._log(payload)
             self._update_controls()
 

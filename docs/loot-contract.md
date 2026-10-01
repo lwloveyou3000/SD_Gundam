@@ -22,7 +22,7 @@ On the single newly-counted reward arrival, before finite-target break or repeat
 
 ## UI
 
-Remove canvas, full-game PhotoImage state, resize/render preview methods and frame-event rendering. Keep small item thumbnails in a loot Treeview. Panel title 战利品统计, metrics cumulative coins/stat rounds/uncertain rounds, rows icon + item name + current-round quantity + cumulative quantity + appearance rounds. Unknown quantities display 待确认. Clear stats on a new start, preserve through pause/resume/stop. On event.kind loot, record_round(event.completed,event.loot) and update. Handle duplicates. Read-only inspection updates recognition/page status but never increments earnings. Ignore/drop normal frame events so no full screenshot backlog builds.
+Remove canvas, full-game PhotoImage state, resize/render preview methods and frame-event rendering. Keep small item thumbnails in a loot Treeview. Panel title 战利品统计, metrics cumulative coins/stat rounds/uncertain rounds, rows icon + item name + current-round quantity + cumulative quantity + appearance rounds. Unknown quantities display 待确认. Clear stats on a new start, preserve through pause/resume/stop. On event.kind loot, record_round(event.completed,event.loot) and update. Handle duplicates. Ignore/drop normal frame events so no full screenshot backlog builds. The compact GUI checks the connection and game page on start; it has no separate page-inspection button.
 
 Keep ADB controls and count controls unchanged. Start preflight constructs LootReader in the background and passes to runner. Stats must not be faked from a current already-open reward page. Native widget tests cover removed preview, duplicate events, aggregation and reset.
 

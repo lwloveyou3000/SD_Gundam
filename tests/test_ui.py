@@ -25,6 +25,8 @@ def window(tmp_path):
     root.update_idletasks()
     yield app
     app._closing = True
+    for timer in root.tk.call('after', 'info'):
+        root.after_cancel(timer)
     root.destroy()
 
 
@@ -86,19 +88,6 @@ def test_background_events_only_change_tk_when_main_thread_drains(window):
     window._handle_event(kind, payload)
     assert window._completed == 2
     assert '2 / 4' in window.count.get()
-
-
-def test_read_only_inspection_does_not_count_loot_or_keep_preview(window):
-    detection = SimpleNamespace(state='prepare', confidence=0.95)
-    window._handle_event('inspection', (detection, True))
-    assert window.status.get() == '页面已检查'
-    assert '关卡准备' in window.page.get()
-    assert window.loot_ledger.rounds == 0
-    assert not window.loot_tree.get_children()
-    for removed in ('canvas', '_frame_image', '_photo', '_render_preview', '_schedule_preview'):
-        assert not hasattr(window, removed)
-    assert window._runner is None
-    assert not window._active
 
 
 def snapshot(*drops, warnings=()):
@@ -198,29 +187,8 @@ def test_start_initializes_reader_in_background_and_passes_it_to_runner(window, 
     assert calls == [('reader', 'preflight-test'), ('runner', reader)]
 
 
-def test_read_only_background_queues_page_metadata_without_frame(window, monkeypatch):
-    from gget_runner import ui
-    image = np.zeros((720, 1280, 3), dtype=np.uint8)
-    detection = SimpleNamespace(state='reward', confidence=0.98)
-    monkeypatch.setattr(window, '_background', lambda work: work())
-    monkeypatch.setattr(window, '_persist', lambda settings: None)
-    monkeypatch.setattr(ui, 'AdbClient', lambda *_args: SimpleNamespace(
-        is_game_foreground=lambda: True, screenshot=lambda: image))
-    monkeypatch.setattr(ui, 'ScreenDetector', lambda *_args: SimpleNamespace(detect=lambda frame: detection))
-    monkeypatch.setattr(ui, 'LootReader', lambda: pytest.fail('只读检查不应初始化战利品识别器'))
-    window.device.set('emulator-5554')
-    window._read_screen()
-    kind, payload = window.events.get_nowait()
-    assert kind == 'inspection'
-    assert payload == (detection, True)
-    window._handle_event(kind, payload)
-    assert window.loot_ledger.rounds == 0
-    assert window._completed == 0
-    assert '奖励结算' in window.page.get()
-
-
-@pytest.mark.parametrize('size, previous_heights', [((1120, 900), (284, 172)), ((950, 700), (204, 92))])
-def test_main_controls_and_loot_fit_window(window, size, previous_heights):
+@pytest.mark.parametrize('size', [(900, 680), (820, 580)])
+def test_main_controls_and_loot_fit_window(window, size):
     window.root.geometry(f'{size[0]}x{size[1]}')
     window.root.deiconify()
     window.root.update()
@@ -228,17 +196,20 @@ def test_main_controls_and_loot_fit_window(window, size, previous_heights):
     width, height = window.root.winfo_width(), window.root.winfo_height()
     root_x, root_y = window.root.winfo_rootx(), window.root.winfo_rooty()
     for control in (window.start_button, window.pause_button, window.resume_button,
-                    window.stop_button, window.read_button, window.refresh_button,
+                    window.stop_button, window.refresh_button, window.browse_button, window.path_entry,
                     window.rounds_entry, window.infinite_check, window.loot_tree, window.log_text,
-                    window.start_hint, window.runtime_hint):
+                    window.device_combo, window.runtime_hint):
         x, y = control.winfo_rootx() - root_x, control.winfo_rooty() - root_y
         assert x >= 0 and y >= 0
         assert x + control.winfo_width() <= width
         assert y + control.winfo_height() <= height
-    assert window.loot_tree.winfo_height() > previous_heights[0]
-    assert window.log_text.winfo_height() > previous_heights[1]
-    assert window.start_hint.winfo_y() == window.runtime_hint.winfo_y()
-    assert window.runtime_hint.winfo_x() >= window.start_hint.winfo_x() + window.start_hint.winfo_width()
+    assert window.loot_tree.winfo_height() > 180
+    assert window.log_text.winfo_height() > 120
+    assert window.start_button.winfo_rooty() < window.runtime_hint.winfo_rooty()
+    assert window.start_button.winfo_rootx() > root_x + width // 2
     assert window.runtime_hint.winfo_rooty() < window.path_entry.winfo_rooty()
-    body = window.start_hint.master.master
-    assert not body.grid_slaves(row=5)
+    assert window.runtime_hint.winfo_rootx() == root_x + 12
+    device_center = window.device_combo.winfo_rooty() + window.device_combo.winfo_height() // 2
+    rounds_center = window.rounds_entry.winfo_rooty() + window.rounds_entry.winfo_height() // 2
+    assert abs(device_center - rounds_center) <= 1
+    assert window.path_entry.master.grid_size()[1] == 2
