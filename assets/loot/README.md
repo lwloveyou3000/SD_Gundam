@@ -19,8 +19,11 @@ depend on a stage, unit, card count, or reward-card position. OCR uses the model
 bundled in RapidOCR locally with CPU thread limits of 2/1. Recognition confidence
 below 85% produces an unknown quantity and a visible warning.
 
-Display thumbnails use the complete 106 × 106 located card plus three pixels of
-the original screenshot on each side (112 × 112). This narrow margin preserves
-outer frame lines despite small locator shifts and excludes the separate hidden
-item strip. Display pixels include the card frame and quantity; item matching
-continues to use only the original 85 × 61 artwork crop and badge mask.
+Display thumbnails copy a 112 × 112 square from the original screenshot around
+the complete card frame. Long perimeter edges in narrow nearby bands calibrate
+the square's center, correcting at most four horizontal or two vertical pixels
+from the locator. The number band, artwork and separate hidden-item strip are
+excluded from edge measurement. If those frame edges cannot be measured, the
+original three-pixel margin remains the fallback. Display pixels include the
+card frame and quantity; item matching continues to use only the original
+85 × 61 artwork crop and badge mask. No blank padding or stretching is applied.

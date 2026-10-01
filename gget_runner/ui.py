@@ -8,7 +8,7 @@ import queue
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, font as tkfont, messagebox, ttk
 
 from PIL import Image, ImageTk
 
@@ -17,6 +17,7 @@ from .loot import LootLedger, LootReader
 from .runner import BotRunner, RunConfig
 from .settings import AppSettings, MAX_ROUNDS, load_settings, save_settings
 from .vision import ScreenDetector
+from .widgets import GridTreeview
 
 
 STATE_LABELS = {"prepare": "关卡准备", "sortie": "出击准备", "battle_intro": "战斗开始",
@@ -79,14 +80,16 @@ class RunnerWindow:
         style.configure("Heading.TLabel", font=("Microsoft YaHei", 14, "bold"), foreground="#17365d")
         style.configure("Muted.TLabel", foreground="#65758a")
         style.configure("Hint.TLabel", foreground="#65758a", font=("Microsoft YaHei", 9))
-        style.configure("Metric.TLabel", font=("Microsoft YaHei", 11, "bold"), foreground="#17365d")
+        style.configure("Status.TLabel", font=("Microsoft YaHei", 9, "bold"), foreground="#17365d")
         style.configure("TButton", padding=(6, 3), font=("Microsoft YaHei", 9), width=6)
         style.configure("Primary.TButton", background="#2769b2", foreground="white")
         style.map("Primary.TButton", background=[("active", "#205895"), ("disabled", "#a6b7cb")])
         style.configure("TCheckbutton", background="#f3f5f8", font=("Microsoft YaHei", 9))
         style.configure("TLabelframe", background="#f3f5f8", bordercolor="#d8e0eb")
         style.configure("TLabelframe.Label", background="#f3f5f8", foreground="#425572", font=("Microsoft YaHei", 9, "bold"))
-        style.configure("Loot.Treeview", rowheight=60, font=("Microsoft YaHei", 9))
+        style.configure("Loot.Treeview", rowheight=38, font=("Microsoft YaHei", 9))
+        style.layout("Loot.Treeview.Item", [("Treeitem.padding", {"sticky": "nswe", "children": [
+            ("Treeitem.image", {"sticky": ""})]})])
         body = ttk.Frame(root, padding=12)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
@@ -96,7 +99,7 @@ class RunnerWindow:
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text="关卡自动挑战", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
         controls = ttk.Frame(header)
-        controls.grid(row=0, column=1, sticky="e")
+        controls.grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
         self.start_button = ttk.Button(controls, text="开始", style="Primary.TButton", command=self._start)
         self.start_button.pack(side="left")
         self.pause_button = ttk.Button(controls, text="暂停", command=lambda: self._control("pause"))
@@ -107,8 +110,12 @@ class RunnerWindow:
         self.stop_button.pack(side="left", padx=(4, 0))
         self.runtime_hint = ttk.Label(header, text="运行期间请保持游戏在模拟器前台；更换关卡前先停止。体力不足或其他提示请手动处理。",
                                       style="Hint.TLabel", wraplength=870)
-        self.runtime_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        header.bind("<Configure>", lambda event: self.runtime_hint.configure(wraplength=max(1, event.width)))
+        self.runtime_hint.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        def wrap_hint(event):
+            width = max(200, event.width - controls.winfo_reqwidth() - 12)
+            if self.runtime_hint.cget("wraplength") != width:
+                self.runtime_hint.configure(wraplength=width)
+        header.bind("<Configure>", wrap_hint)
 
         setup = ttk.LabelFrame(body, text="连接与挑战次数", padding=8)
         setup.grid(row=1, column=0, sticky="ew")
@@ -117,29 +124,38 @@ class RunnerWindow:
         self.path_entry = ttk.Entry(setup, textvariable=self.adb_path)
         self.path_entry.grid(row=0, column=1, sticky="ew", padx=(0, 6))
         self.browse_button = ttk.Button(setup, text="浏览", command=self._browse)
-        self.browse_button.grid(row=0, column=2, sticky="ew")
-        options = ttk.Frame(setup)
-        options.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(6, 0))
-        options.columnconfigure(1, weight=1)
-        ttk.Label(options, text="模拟器").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self.device_combo = ttk.Combobox(options, textvariable=self.device, state="readonly", width=18,
+        self.browse_button.grid(row=0, column=2, sticky="ew", padx=(0, 12))
+        ttk.Label(setup, text="模拟器").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.device_combo = ttk.Combobox(setup, textvariable=self.device, state="readonly", width=16,
                                          values=(self.device.get(),) if self.device.get() else ())
-        self.device_combo.grid(row=0, column=1, sticky="ew", padx=(0, 6))
-        self.refresh_button = ttk.Button(options, text="刷新", command=self._refresh_devices)
-        self.refresh_button.grid(row=0, column=2)
-        ttk.Label(options, text="次数").grid(row=0, column=3, padx=(12, 6))
+        self.device_combo.grid(row=1, column=1, sticky="ew", padx=(0, 6), pady=(6, 0))
+        self.refresh_button = ttk.Button(setup, text="刷新", command=self._refresh_devices)
+        self.refresh_button.grid(row=1, column=2, sticky="ew", padx=(0, 12), pady=(6, 0))
+        options = ttk.Frame(setup)
+        options.grid(row=0, column=3, sticky="w")
+        ttk.Label(options, text="次数").grid(row=0, column=0, padx=(0, 6))
         self.rounds_entry = ttk.Spinbox(options, from_=1, to=MAX_ROUNDS, width=6, textvariable=self.rounds)
-        self.rounds_entry.grid(row=0, column=4)
-        ttk.Label(options, text="次").grid(row=0, column=5, padx=(4, 8))
+        self.rounds_entry.grid(row=0, column=1)
+        ttk.Label(options, text="次").grid(row=0, column=2, padx=(4, 8))
         self.infinite_check = ttk.Checkbutton(options, text="无限循环", variable=self.infinite,
                                              command=self._mode_changed)
-        self.infinite_check.grid(row=0, column=6, sticky="w")
-        ttk.Label(options, text="有限次数停在奖励页", style="Muted.TLabel").grid(row=0, column=7, padx=(12, 0))
+        self.infinite_check.grid(row=0, column=3, sticky="w")
+        ttk.Label(options, text="有限次数停在奖励页", style="Muted.TLabel").grid(row=0, column=4, padx=(12, 0))
+        status_line = ttk.Frame(setup)
+        status_line.grid(row=1, column=3, sticky="ew", pady=(6, 0))
+        self.status_label = ttk.Label(status_line, textvariable=self.status, style="Status.TLabel", width=16)
+        self.status_label.grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.count_label = ttk.Label(status_line, textvariable=self.count, width=22)
+        self.count_label.grid(row=0, column=1, sticky="w", padx=(0, 6))
+        self.page_label = ttk.Label(status_line, textvariable=self.page, width=16, style="Muted.TLabel")
+        self.page_label.grid(row=0, column=2, sticky="w", padx=(0, 6))
+        self.progress = ttk.Progressbar(status_line, mode="determinate", maximum=1, length=56)
+        self.progress.grid(row=0, column=3, sticky="e")
 
         content = ttk.Frame(body)
         content.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
-        content.columnconfigure(0, weight=3)
-        content.columnconfigure(1, weight=2)
+        content.columnconfigure(0, weight=0)
+        content.columnconfigure(1, weight=1)
         content.rowconfigure(0, weight=1)
         loot_panel = ttk.LabelFrame(content, text="战利品统计", padding=8)
         loot_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
@@ -147,36 +163,28 @@ class RunnerWindow:
         loot_panel.rowconfigure(1, weight=1)
         metrics = ttk.Frame(loot_panel)
         metrics.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        for value in (self.coin_total, self.loot_rounds, self.warning_rounds):
-            ttk.Label(metrics, textvariable=value).pack(side="left", padx=(0, 12))
-        self.loot_tree = ttk.Treeview(loot_panel, columns=("name", "last", "total", "rounds"),
-                                     show="tree headings", style="Loot.Treeview", height=6)
+        ttk.Label(metrics, textvariable=self.coin_total).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(metrics, textvariable=self.loot_rounds).grid(row=1, column=0, sticky="w", padx=(0, 12))
+        ttk.Label(metrics, textvariable=self.warning_rounds).grid(row=1, column=1, sticky="w")
+        self.loot_tree = GridTreeview(loot_panel, rowheight=38, columns=("name", "last", "total", "rounds"),
+                                     show="tree headings", style="Loot.Treeview", height=8)
+        table_font = tkfont.Font(root, font=("Microsoft YaHei", 9))
         self.loot_tree.heading("#0", text="图标")
-        self.loot_tree.column("#0", width=68, minwidth=68, stretch=False)
-        for key, title, width in (("name", "名称", 104), ("last", "本轮数量", 74),
-                                   ("total", "累计数量", 100), ("rounds", "出现轮数", 72)):
-            self.loot_tree.heading(key, text=title)
-            self.loot_tree.column(key, width=width, minwidth=width, anchor="w" if key == "name" else "center")
+        self.loot_tree.column("#0", width=42, minwidth=42, stretch=False, anchor="center")
+        for key, title, sample in (("name", "名称", "汉字名称"), ("last", "本轮数量", "9999999"),
+                                   ("total", "累计数量", "9,999,999"), ("rounds", "出现\n轮次", "999")):
+            width = max(table_font.measure(sample), table_font.measure(title.split("\n")[0])) + 10
+            self.loot_tree.heading(key, text=title, anchor="center")
+            self.loot_tree.column(key, width=width, minwidth=width, stretch=False, anchor="center")
         self.loot_tree.grid(row=1, column=0, sticky="nsew")
         loot_scroll = ttk.Scrollbar(loot_panel, orient="vertical", command=self.loot_tree.yview)
         loot_scroll.grid(row=1, column=1, sticky="ns")
-        self.loot_tree.configure(yscrollcommand=loot_scroll.set)
+        self.loot_tree.set_scrollbar(loot_scroll)
         ttk.Label(loot_panel, text="仅统计本次挑战新获得的战利品；无法确认的数量显示「待确认」。",
-                  style="Muted.TLabel", wraplength=420).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+                  style="Muted.TLabel", wraplength=270).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
-        side = ttk.Frame(content)
-        side.grid(row=0, column=1, sticky="nsew")
-        side.columnconfigure(0, weight=1)
-        side.rowconfigure(1, weight=1)
-        summary = ttk.LabelFrame(side, text="挑战状态", padding=8)
-        summary.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ttk.Label(summary, textvariable=self.status, style="Metric.TLabel").pack(anchor="w")
-        ttk.Label(summary, textvariable=self.count, style="Metric.TLabel").pack(anchor="w", pady=(3, 5))
-        self.progress = ttk.Progressbar(summary, mode="determinate", maximum=1)
-        self.progress.pack(fill="x")
-        ttk.Label(summary, textvariable=self.page, wraplength=240).pack(anchor="w", pady=(6, 0))
-        log_frame = ttk.LabelFrame(side, text="运行记录", padding=6)
-        log_frame.grid(row=1, column=0, sticky="nsew")
+        log_frame = ttk.LabelFrame(content, text="运行记录", padding=6)
+        log_frame.grid(row=0, column=1, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         self.log_text = tk.Text(log_frame, state="disabled", wrap="word", width=28, height=9,
@@ -349,10 +357,10 @@ class RunnerWindow:
 
     def _update_count(self) -> None:
         if self._infinite_run:
-            self.count.set(f"累计完成 {self._completed} 次 · 无限")
+            self.count.set(f"完成 {self._completed} 次 · 无限")
             self.progress.configure(maximum=1, value=0)
         else:
-            self.count.set(f"已完成 {self._completed} / {self._target} 次")
+            self.count.set(f"完成 {self._completed} / {self._target} 次")
             self.progress.configure(maximum=max(1, self._target), value=self._completed)
 
     def _log(self, message: str) -> None:
@@ -377,7 +385,7 @@ class RunnerWindow:
                 try:
                     with Image.open(BytesIO(row.icon_png)) as source:
                         icon = source.convert("RGBA")
-                    icon.thumbnail((52, 52), Image.Resampling.LANCZOS)
+                    icon.thumbnail((31, 31), Image.Resampling.LANCZOS)
                     self._loot_icons[row.item_id] = ImageTk.PhotoImage(icon, master=self.root)
                 except (OSError, ValueError):
                     pass
@@ -386,6 +394,7 @@ class RunnerWindow:
             self.loot_tree.insert("", "end", iid=row.item_id,
                                   image=self._loot_icons.get(row.item_id, ""),
                                   values=(row.name, last, total, row.rounds))
+        self.loot_tree.refresh_grid()
 
     def _end_run(self, message: str) -> None:
         self._active = self._paused = self._stopping = self._control_pending = False
@@ -404,7 +413,7 @@ class RunnerWindow:
             for warning in event.loot.warnings:
                 self._log("战利品待确认：" + warning)
         if event.state:
-            self.page.set("当前页面：" + STATE_LABELS.get(event.state, event.state))
+            self.page.set(STATE_LABELS.get(event.state, event.state))
         self._completed = event.completed
         self._update_count()
         if event.message:

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from io import BytesIO
 import threading
 import tkinter as tk
+from tkinter import font as tkfont
 
 import numpy as np
 import pytest
@@ -25,6 +26,7 @@ def window(tmp_path):
     root.update_idletasks()
     yield app
     app._closing = True
+    app.loot_tree.cancel_grid()
     for timer in root.tk.call('after', 'info'):
         root.after_cancel(timer)
     root.destroy()
@@ -125,10 +127,10 @@ def test_unknown_quantities_are_visible_and_full_card_icons_are_kept(window):
     assert window.loot_tree.item('item01', 'values') == ('道具01', '待确认', '2 + 待确认', '1')
     assert window.warning_rounds.get() == '待确认轮数：1'
     icon = window._loot_icons['item01']
-    assert (icon.width(), icon.height()) == (52, 52)
+    assert (icon.width(), icon.height()) == (31, 31)
     shown = ImageTk.getimage(icon)
-    assert shown.getpixel((26, 0))[0] > 240
-    assert shown.getpixel((26, 51))[1] > 120
+    assert shown.getpixel((15, 0))[0] > 230
+    assert shown.getpixel((15, 30))[1] > 120
     assert window.loot_tree.item('item01', 'image')
 
 
@@ -198,18 +200,67 @@ def test_main_controls_and_loot_fit_window(window, size):
     for control in (window.start_button, window.pause_button, window.resume_button,
                     window.stop_button, window.refresh_button, window.browse_button, window.path_entry,
                     window.rounds_entry, window.infinite_check, window.loot_tree, window.log_text,
-                    window.device_combo, window.runtime_hint):
+                    window.device_combo, window.runtime_hint, window.progress,
+                    window.status_label, window.count_label, window.page_label):
         x, y = control.winfo_rootx() - root_x, control.winfo_rooty() - root_y
         assert x >= 0 and y >= 0
         assert x + control.winfo_width() <= width
         assert y + control.winfo_height() <= height
     assert window.loot_tree.winfo_height() > 180
     assert window.log_text.winfo_height() > 120
-    assert window.start_button.winfo_rooty() < window.runtime_hint.winfo_rooty()
     assert window.start_button.winfo_rootx() > root_x + width // 2
     assert window.runtime_hint.winfo_rooty() < window.path_entry.winfo_rooty()
     assert window.runtime_hint.winfo_rootx() == root_x + 12
-    device_center = window.device_combo.winfo_rooty() + window.device_combo.winfo_height() // 2
-    rounds_center = window.rounds_entry.winfo_rooty() + window.rounds_entry.winfo_height() // 2
-    assert abs(device_center - rounds_center) <= 1
+    controls = window.start_button.master
+    header = controls.master
+    assert abs(controls.winfo_y() + controls.winfo_height() / 2 - header.winfo_height() / 2) <= 1
+    assert window.path_entry.winfo_rootx() == window.device_combo.winfo_rootx()
+    assert window.log_text.winfo_width() > window.loot_tree.winfo_width()
+    assert window.log_text.winfo_height() > window.loot_tree.winfo_height()
+    assert window.progress.master.master is window.path_entry.master
     assert window.path_entry.master.grid_size()[1] == 2
+    table_font = tkfont.Font(window.root, font=('Microsoft YaHei', 9))
+    for column, sample in (('name', '汉字名称'), ('last', '9999999'),
+                           ('total', '9,999,999'), ('rounds', '999')):
+        assert window.loot_tree.column(column, 'width') >= table_font.measure(sample) + 4
+        assert str(window.loot_tree.column(column, 'anchor')) == 'center'
+
+
+def test_grid_lines_follow_scrolling_and_pass_selection_and_wheel_input(window):
+    tree = window.loot_tree
+    for number in range(50):
+        tree.insert('', 'end', iid=f'row{number}', values=('道具01', number, number, number))
+    window.root.deiconify()
+    tree.refresh_grid()
+    window.root.update()
+    tree.yview_moveto(.2)
+    window.root.update()
+    vertical = [line for line in tree._grid_lines if line.winfo_ismapped() and line.winfo_width() == 1]
+    horizontal = [line for line in tree._grid_lines if line.winfo_ismapped() and line.winfo_height() == 1
+                  and line.winfo_width() > 1]
+    assert len(vertical) >= 4 and horizontal
+    visible = next(item for item in tree.get_children()
+                   if tree.bbox(item) and tree.bbox(item)[1] > 0
+                   and tree.bbox(item)[1] + tree.bbox(item)[3] < tree.winfo_height())
+    x, y, width, height = tree.bbox(visible)
+    assert any(line.winfo_y() == y + height - 1 for line in horizontal)
+    line = vertical[0]
+    click_y = y + height // 2 - line.winfo_y()
+    line.event_generate('<Button-1>', x=0, y=click_y)
+    line.event_generate('<ButtonRelease-1>', x=0, y=click_y)
+    window.root.update()
+    assert tree.selection() == (visible,)
+    before = tree.yview()[0]
+    line.event_generate('<MouseWheel>', x=0, y=click_y, delta=-120)
+    window.root.update()
+    assert tree.yview()[0] > before
+
+
+def test_grid_can_close_with_a_pending_redraw(window):
+    tree = window.loot_tree
+    tree.refresh_grid()
+    pending = tree._grid_job
+    assert pending in window.root.tk.call('after', 'info')
+    tree.destroy()
+    assert pending not in window.root.tk.call('after', 'info')
+    window.root.update_idletasks()

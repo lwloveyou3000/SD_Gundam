@@ -204,13 +204,43 @@ class LootReader:
         self._items.append((item_id, name, signature))
         return item_id, name
 
-    def _display_icon(self, frame: np.ndarray, x: int, y: int) -> np.ndarray:
+    @staticmethod
+    def _frame_bounds(frame: np.ndarray, x: int, y: int) -> tuple[int, int, int, int] | None:
+        """Measure only long perimeter lines in narrow bands near the locator."""
+        edges = cv2.Canny(frame[y - 4:y + 110, x - 4:x + 113], 50, 150)
+        # Side samples stop above quantities; bottom samples stop before the
+        # separate hidden-item bar. Artwork and badges are outside these bands.
+        left = np.flatnonzero(np.count_nonzero(edges[20:86, 1:14], axis=0) >= 15) + x - 3
+        right = np.flatnonzero(np.count_nonzero(edges[20:86, 101:113], axis=0) >= 15) + x + 97
+        top = np.flatnonzero(np.count_nonzero(edges[1:12, 24:90], axis=1) >= 15) + y - 3
+        bottom = np.flatnonzero(np.count_nonzero(edges[101:110, 24:90], axis=1) >= 15) + y + 97
+        if any(not len(side) for side in (left, right, top, bottom)):
+            return None
+        bounds = int(left[0]), int(top[0]), int(right[-1]), int(bottom[-1])
+        if not (95 <= bounds[2] - bounds[0] <= 108 and 95 <= bounds[3] - bounds[1] <= 108):
+            return None
+        return bounds
+
+    def _display_bounds(self, frame: np.ndarray, x: int, y: int) -> tuple[int, int, int, int]:
         height, width = self._card_mask.shape
         margin = self._DISPLAY_FRAME_MARGIN
-        # The edge locator can shift a few pixels between screenshots. Preserve
-        # the real surrounding pixels so every perimeter line remains visible;
-        # the separate hidden-item strip starts below this crop.
-        return frame[y - margin:y + height + margin, x - margin:x + width + margin].copy()
+        left, top = x - margin, y - margin
+        display_width, display_height = width + 2 * margin, height + 2 * margin
+        frame_bounds = self._frame_bounds(frame, x, y)
+        if frame_bounds is not None:
+            x1, y1, x2, y2 = frame_bounds
+            centered_left = math.floor((x1 + x2 - display_width + 1) / 2 + 0.5)
+            centered_top = math.floor((y1 + y2 - display_height + 1) / 2 + 0.5)
+            # Only display coordinates move. Bound calibration to the locator's
+            # small uncertainty, retaining the original identity/OCR positions.
+            left = max(left - 4, min(left + 4, centered_left))
+            top = max(top - 2, min(top + 2, centered_top))
+        return left, top, left + display_width, top + display_height
+
+    def _display_icon(self, frame: np.ndarray, x: int, y: int) -> np.ndarray:
+        left, top, right, bottom = self._display_bounds(frame, x, y)
+        # Copy real screenshot pixels; never pad or stretch the displayed card.
+        return frame[top:bottom, left:right].copy()
 
     @classmethod
     def _parse_quantity(cls, text: str, confidence: float) -> int | None:

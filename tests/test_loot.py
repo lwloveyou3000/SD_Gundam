@@ -60,8 +60,10 @@ def test_second_real_reward_and_cross_frame_identities(reader):
 @pytest.mark.parametrize("name, size", [("reward.png", (1280, 720)),
                                         ("loot-live-reward.png", (1280, 720)),
                                         ("reward.png", (960, 540)),
-                                        ("reward.png", (1920, 1080))])
-def test_display_icons_include_the_whole_square_frame_from_normalized_source(name, size):
+                                        ("reward.png", (1920, 1080)),
+                                        ("loot-live-reward.png", (960, 540)),
+                                        ("loot-live-reward.png", (1920, 1080))])
+def test_display_icons_center_the_whole_square_frame_from_normalized_source(name, size):
     reader = LootReader()
     source = cv2.resize(load(name), size)
     normalized = cv2.resize(source, (1280, 720), interpolation=(
@@ -69,18 +71,39 @@ def test_display_icons_include_the_whole_square_frame_from_normalized_source(nam
     cards = reader._cards(normalized)
     snapshot = reader.read(source)
     assert len(snapshot.drops) == (7 if name == "loot-live-reward.png" else 6)
-    for drop, (x, y) in zip(snapshot.drops, cards):
+    assert [drop.quantity for drop in snapshot.drops] == (
+        [2, 1, 2000, 2, 1, 1, 1] if name == "loot-live-reward.png" else [2, 1, 2000, 2, 1, 2])
+    # Visible perimeter coordinates measured independently from the original
+    # reference images. The former symmetric locator padding fails this check.
+    original_perimeters = {
+        "reward.png": [(62, 156, 165, 259), (177, 156, 282, 259), (296, 154, 399, 259),
+                       (413, 156, 513, 259), (533, 156, 633, 259), (648, 156, 751, 259)],
+        "loot-live-reward.png": [(62, 157, 164, 260), (178, 156, 280, 260), (294, 154, 400, 260),
+                                 (414, 157, 516, 260), (530, 156, 632, 260), (647, 157, 750, 260),
+                                 (763, 157, 868, 260)],
+    }
+    for index, (drop, (x, y)) in enumerate(zip(snapshot.drops, cards)):
         icon = cv2.imdecode(np.frombuffer(drop.icon_png, np.uint8), cv2.IMREAD_COLOR)
         assert icon.shape == (112, 112, 3)
-        # Check the entire background frame, including its top and bottom lines.
-        # The extra pixels must come from the screenshot, never synthetic fill.
-        np.testing.assert_array_equal(icon, normalized[y - 3:y + 109, x - 3:x + 109])
-        np.testing.assert_array_equal(icon[3:109, 3:109], normalized[y:y + 106, x:x + 106])
-    if name == "reward.png" and size == (1280, 720):
-        first = cv2.imdecode(np.frombuffer(snapshot.drops[0].icon_png, np.uint8), cv2.IMREAD_COLOR)
-        np.testing.assert_array_equal(first, source[152:264, 57:169])
-        # The red hidden-item bar starts at y266, outside the displayed card.
-        assert 152 + first.shape[0] < 266
+        left, top, right, bottom = reader._display_bounds(normalized, x, y)
+        np.testing.assert_array_equal(icon, normalized[top:bottom, left:right])
+        assert bottom <= (267 if name == "loot-live-reward.png" else 266)
+        perimeter = (original_perimeters[name][index] if size == (1280, 720)
+                     else reader._frame_bounds(normalized, x, y))
+        if perimeter is not None:
+            x1, y1, x2, y2 = perimeter
+            margins = x1 - left, right - 1 - x2, y1 - top, bottom - 1 - y2
+            assert min(margins) >= 2
+            assert abs(margins[0] - margins[1]) <= 1
+            assert abs(margins[2] - margins[3]) <= 1
+
+
+def test_unmeasurable_frame_keeps_original_display_crop_without_fabricating_edges():
+    reader = LootReader()
+    source = np.full((720, 1280, 3), 25, np.uint8)
+    assert reader._frame_bounds(source, 60, 155) is None
+    assert reader._display_bounds(source, 60, 155) == (57, 152, 169, 264)
+    np.testing.assert_array_equal(reader._display_icon(source, 60, 155), source[152:264, 57:169])
 
 
 def test_display_changes_do_not_split_identity_or_reuse_old_card_pixels():
