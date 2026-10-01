@@ -18,3 +18,9 @@ colored artwork, excluding the number band and bonus badge; matching does not
 depend on a stage, unit, card count, or reward-card position. OCR uses the models
 bundled in RapidOCR locally with CPU thread limits of 2/1. Recognition confidence
 below 85% produces an unknown quantity and a visible warning.
+
+Display thumbnails use the complete 106 × 106 located card plus three pixels of
+the original screenshot on each side (112 × 112). This narrow margin preserves
+outer frame lines despite small locator shifts and excludes the separate hidden
+item strip. Display pixels include the card frame and quantity; item matching
+continues to use only the original 85 × 61 artwork crop and badge mask.

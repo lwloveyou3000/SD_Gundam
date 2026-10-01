@@ -68,7 +68,7 @@ class RunnerWindow:
     def _build(self) -> None:
         root = self.root
         root.title("SD 高达 · 关卡自动挑战")
-        root.geometry("1120x780")
+        root.geometry("1120x900")
         root.minsize(950, 700)
         root.configure(bg="#f3f5f8")
         root.option_add("*Font", ("Microsoft YaHei", 10))
@@ -78,6 +78,7 @@ class RunnerWindow:
         style.configure("TLabel", background="#f3f5f8", foreground="#273447", font=("Microsoft YaHei", 10))
         style.configure("Heading.TLabel", font=("Microsoft YaHei", 20, "bold"), foreground="#17365d")
         style.configure("Muted.TLabel", foreground="#65758a")
+        style.configure("Hint.TLabel", foreground="#65758a", font=("Microsoft YaHei", 9))
         style.configure("Metric.TLabel", font=("Microsoft YaHei", 17, "bold"), foreground="#17365d")
         style.configure("TButton", padding=(13, 8), font=("Microsoft YaHei", 10))
         style.configure("Primary.TButton", background="#2769b2", foreground="white")
@@ -85,16 +86,29 @@ class RunnerWindow:
         style.configure("TCheckbutton", background="#f3f5f8", font=("Microsoft YaHei", 10))
         style.configure("TLabelframe", background="#f3f5f8", bordercolor="#d8e0eb")
         style.configure("TLabelframe.Label", background="#f3f5f8", foreground="#425572", font=("Microsoft YaHei", 10, "bold"))
-        style.configure("Loot.Treeview", rowheight=44, font=("Microsoft YaHei", 10))
-        body = ttk.Frame(root, padding=(24, 18))
+        style.configure("Loot.Treeview", rowheight=60, font=("Microsoft YaHei", 10))
+        body = ttk.Frame(root, padding=(20, 12))
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
         body.rowconfigure(4, weight=1)
         ttk.Label(body, text="关卡自动挑战", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(body, text="开启 AUTO 后，从已选关卡、出击准备、TAP TO NEXT 或自动战斗页面启动。未知弹窗请人工处理。",
-                  style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(5, 14))
+        hints = ttk.Frame(body)
+        hints.grid(row=1, column=0, sticky="ew", pady=(4, 8))
+        hints.columnconfigure((0, 1), weight=1, uniform="hints")
+        self.start_hint = ttk.Label(hints, text="开启 AUTO 后，从已选关卡、出击准备、TAP TO NEXT 或自动战斗页面启动。未知弹窗请人工处理。",
+                                    style="Hint.TLabel", wraplength=520)
+        self.start_hint.grid(row=0, column=0, sticky="nw", padx=(0, 8))
+        self.runtime_hint = ttk.Label(hints, text="运行期间请保持游戏在模拟器前台；更换关卡前先停止。体力不足或其他提示请手动处理。",
+                                      style="Hint.TLabel", wraplength=520)
+        self.runtime_hint.grid(row=0, column=1, sticky="nw", padx=(8, 0))
+        def wrap_hints(event):
+            width = max(1, event.width // 2 - 16)
+            if int(self.start_hint.cget("wraplength")) != width:
+                self.start_hint.configure(wraplength=width)
+                self.runtime_hint.configure(wraplength=width)
+        hints.bind("<Configure>", wrap_hints)
 
-        setup = ttk.LabelFrame(body, text="连接与挑战次数", padding=14)
+        setup = ttk.LabelFrame(body, text="连接与挑战次数", padding=10)
         setup.grid(row=2, column=0, sticky="ew")
         setup.columnconfigure(1, weight=1)
         ttk.Label(setup, text="ADB 程序").grid(row=0, column=0, sticky="w", padx=(0, 12))
@@ -119,7 +133,7 @@ class RunnerWindow:
         self.infinite_check.pack(side="left")
         ttk.Label(options, text="有限次数完成后停在奖励页", style="Muted.TLabel", padding=(20, 0, 0, 0)).pack(side="left")
 
-        controls = ttk.Frame(body, padding=(0, 12, 0, 12))
+        controls = ttk.Frame(body, padding=(0, 8, 0, 8))
         controls.grid(row=3, column=0, sticky="ew")
         self.start_button = ttk.Button(controls, text="开始挑战", style="Primary.TButton", command=self._start)
         self.start_button.pack(side="left")
@@ -148,7 +162,7 @@ class RunnerWindow:
         self.loot_tree = ttk.Treeview(loot_panel, columns=("name", "last", "total", "rounds"),
                                      show="tree headings", style="Loot.Treeview", height=6)
         self.loot_tree.heading("#0", text="图标")
-        self.loot_tree.column("#0", width=54, minwidth=48, stretch=False)
+        self.loot_tree.column("#0", width=68, minwidth=68, stretch=False)
         for key, title, width in (("name", "名称", 118), ("last", "本轮数量", 90),
                                    ("total", "累计数量", 100), ("rounds", "出现轮数", 90)):
             self.loot_tree.heading(key, text=title)
@@ -164,13 +178,13 @@ class RunnerWindow:
         side.grid(row=0, column=1, sticky="nsew")
         side.columnconfigure(0, weight=1)
         side.rowconfigure(1, weight=1)
-        summary = ttk.LabelFrame(side, text="挑战状态", padding=14)
+        summary = ttk.LabelFrame(side, text="挑战状态", padding=10)
         summary.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         ttk.Label(summary, textvariable=self.status, style="Metric.TLabel").pack(anchor="w")
-        ttk.Label(summary, textvariable=self.count, style="Metric.TLabel").pack(anchor="w", pady=(7, 9))
+        ttk.Label(summary, textvariable=self.count, style="Metric.TLabel").pack(anchor="w", pady=(5, 7))
         self.progress = ttk.Progressbar(summary, mode="determinate", maximum=1)
         self.progress.pack(fill="x")
-        ttk.Label(summary, textvariable=self.page, wraplength=340).pack(anchor="w", pady=(10, 0))
+        ttk.Label(summary, textvariable=self.page, wraplength=340).pack(anchor="w", pady=(8, 0))
         log_frame = ttk.LabelFrame(side, text="运行记录", padding=8)
         log_frame.grid(row=1, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
@@ -182,8 +196,6 @@ class RunnerWindow:
         scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scrollbar.set)
-        ttk.Label(body, text="运行期间请保持游戏在模拟器前台；更换关卡前先停止。体力不足或其他提示请手动处理。",
-                  style="Muted.TLabel").grid(row=5, column=0, sticky="w", pady=(12, 0))
 
     def _background(self, target) -> None:
         threading.Thread(target=target, daemon=True).start()
@@ -400,7 +412,7 @@ class RunnerWindow:
                 try:
                     with Image.open(BytesIO(row.icon_png)) as source:
                         icon = source.convert("RGBA")
-                    icon.thumbnail((36, 36), Image.Resampling.LANCZOS)
+                    icon.thumbnail((52, 52), Image.Resampling.LANCZOS)
                     self._loot_icons[row.item_id] = ImageTk.PhotoImage(icon, master=self.root)
                 except (OSError, ValueError):
                     pass

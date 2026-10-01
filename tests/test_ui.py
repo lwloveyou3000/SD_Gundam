@@ -7,7 +7,7 @@ import tkinter as tk
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageTk
 
 from gget_runner.adb import Device
 from gget_runner.runner import RunEvent
@@ -125,14 +125,21 @@ def test_loot_aggregates_cards_deduplicates_round_and_shows_current_round(window
     assert window.loot_rounds.get() == '统计轮数：2'
 
 
-def test_unknown_quantities_are_visible_and_small_icons_are_kept(window):
+def test_unknown_quantities_are_visible_and_full_card_icons_are_kept(window):
     png = BytesIO()
-    Image.new('RGB', (48, 48), 'blue').save(png, format='PNG')
+    card = Image.new('RGB', (106, 106), 'blue')
+    card.paste('red', (0, 0, 106, 6))
+    card.paste('green', (0, 100, 106, 106))
+    card.save(png, format='PNG')
     window._runner_event(loot_event(1, snapshot(drop(quantity=2, icon_png=png.getvalue()),
                                               drop(quantity=None), warnings=('数量无法确认',))))
     assert window.loot_tree.item('item01', 'values') == ('道具01', '待确认', '2 + 待确认', '1')
     assert window.warning_rounds.get() == '待确认轮数：1'
-    assert window._loot_icons['item01'].width() <= 36
+    icon = window._loot_icons['item01']
+    assert (icon.width(), icon.height()) == (52, 52)
+    shown = ImageTk.getimage(icon)
+    assert shown.getpixel((26, 0))[0] > 240
+    assert shown.getpixel((26, 51))[1] > 120
     assert window.loot_tree.item('item01', 'image')
 
 
@@ -212,17 +219,26 @@ def test_read_only_background_queues_page_metadata_without_frame(window, monkeyp
     assert '奖励结算' in window.page.get()
 
 
-@pytest.mark.parametrize('size', [(1120, 780), (950, 700)])
-def test_main_controls_and_loot_fit_window(window, size):
+@pytest.mark.parametrize('size, previous_heights', [((1120, 900), (284, 172)), ((950, 700), (204, 92))])
+def test_main_controls_and_loot_fit_window(window, size, previous_heights):
     window.root.geometry(f'{size[0]}x{size[1]}')
     window.root.deiconify()
+    window.root.update()
     window.root.update_idletasks()
     width, height = window.root.winfo_width(), window.root.winfo_height()
     root_x, root_y = window.root.winfo_rootx(), window.root.winfo_rooty()
     for control in (window.start_button, window.pause_button, window.resume_button,
                     window.stop_button, window.read_button, window.refresh_button,
-                    window.rounds_entry, window.infinite_check, window.loot_tree):
+                    window.rounds_entry, window.infinite_check, window.loot_tree, window.log_text,
+                    window.start_hint, window.runtime_hint):
         x, y = control.winfo_rootx() - root_x, control.winfo_rooty() - root_y
         assert x >= 0 and y >= 0
         assert x + control.winfo_width() <= width
         assert y + control.winfo_height() <= height
+    assert window.loot_tree.winfo_height() > previous_heights[0]
+    assert window.log_text.winfo_height() > previous_heights[1]
+    assert window.start_hint.winfo_y() == window.runtime_hint.winfo_y()
+    assert window.runtime_hint.winfo_x() >= window.start_hint.winfo_x() + window.start_hint.winfo_width()
+    assert window.runtime_hint.winfo_rooty() < window.path_entry.winfo_rooty()
+    body = window.start_hint.master.master
+    assert not body.grid_slaves(row=5)

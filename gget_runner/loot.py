@@ -114,6 +114,7 @@ class LootReader:
     _MIN_OCR_CONFIDENCE = 0.85
     _CARD_THRESHOLD = 0.62
     _ITEM_DISTANCE = 12.0
+    _DISPLAY_FRAME_MARGIN = 3
 
     def __init__(self):
         asset_dir = Path(__file__).resolve().parent.parent / "assets" / "loot"
@@ -124,7 +125,7 @@ class LootReader:
                                      for i in range(6))
         self._multiplier = self._load(asset_dir / "multiplier.png", cv2.IMREAD_GRAYSCALE)
         self._coin_signature = self._signature(self._load(asset_dir / "coin.png", cv2.IMREAD_COLOR))
-        self._items: list[tuple[str, str, np.ndarray, bytes]] = []
+        self._items: list[tuple[str, str, np.ndarray]] = []
         self._ocr = None
 
     @staticmethod
@@ -190,19 +191,26 @@ class LootReader:
                 best = min(best, float(difference[valid].mean()))
         return best
 
-    def _identity(self, icon: np.ndarray) -> tuple[str, str, bytes]:
+    def _identity(self, icon: np.ndarray) -> tuple[str, str]:
         signature = self._signature(icon)
-        png = self._png(icon)
         if self._distance(signature, self._coin_signature) <= self._ITEM_DISTANCE:
-            return "coin", "金币", png
+            return "coin", "金币"
         distances = [self._distance(signature, item[2]) for item in self._items]
         if distances and min(distances) <= self._ITEM_DISTANCE:
             item = self._items[int(np.argmin(distances))]
-            return item[0], item[1], item[3]
+            return item[0], item[1]
         number = len(self._items) + 1
         item_id, name = f"item-{number:02d}", f"道具{number:02d}"
-        self._items.append((item_id, name, signature, png))
-        return item_id, name, png
+        self._items.append((item_id, name, signature))
+        return item_id, name
+
+    def _display_icon(self, frame: np.ndarray, x: int, y: int) -> np.ndarray:
+        height, width = self._card_mask.shape
+        margin = self._DISPLAY_FRAME_MARGIN
+        # The edge locator can shift a few pixels between screenshots. Preserve
+        # the real surrounding pixels so every perimeter line remains visible;
+        # the separate hidden-item strip starts below this crop.
+        return frame[y - margin:y + height + margin, x - margin:x + width + margin].copy()
 
     @classmethod
     def _parse_quantity(cls, text: str, confidence: float) -> int | None:
@@ -285,8 +293,11 @@ class LootReader:
             return LootSnapshot(warnings=("奖励页未识别到可见战利品卡片，数量待确认",))
         drops, warnings = [], []
         for index, (x, y) in enumerate(cards, 1):
-            icon = frame[y + 17:y + 78, x + 7:x + 92].copy()
-            item_id, name, png = self._identity(icon)
+            artwork = frame[y + 17:y + 78, x + 7:x + 92].copy()
+            item_id, name = self._identity(artwork)
+            # Full cards are display-only: their frame, quantity and bonus badge
+            # never enter the item signature or alter identity across rounds.
+            png = self._png(self._display_icon(frame, x, y))
             try:
                 quantity, confidence = self._quantity(frame[y + 77:y + 100, x + 8:x + 96], item_id == "coin")
             except Exception as exc:

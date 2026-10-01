@@ -57,6 +57,46 @@ def test_second_real_reward_and_cross_frame_identities(reader):
     assert [row.total_quantity for row in ledger.rows] == [4, 2, 2000, 1, 1]
 
 
+@pytest.mark.parametrize("name, size", [("reward.png", (1280, 720)),
+                                        ("loot-live-reward.png", (1280, 720)),
+                                        ("reward.png", (960, 540)),
+                                        ("reward.png", (1920, 1080))])
+def test_display_icons_include_the_whole_square_frame_from_normalized_source(name, size):
+    reader = LootReader()
+    source = cv2.resize(load(name), size)
+    normalized = cv2.resize(source, (1280, 720), interpolation=(
+        cv2.INTER_AREA if size[0] > 1280 else cv2.INTER_LINEAR))
+    cards = reader._cards(normalized)
+    snapshot = reader.read(source)
+    assert len(snapshot.drops) == (7 if name == "loot-live-reward.png" else 6)
+    for drop, (x, y) in zip(snapshot.drops, cards):
+        icon = cv2.imdecode(np.frombuffer(drop.icon_png, np.uint8), cv2.IMREAD_COLOR)
+        assert icon.shape == (112, 112, 3)
+        # Check the entire background frame, including its top and bottom lines.
+        # The extra pixels must come from the screenshot, never synthetic fill.
+        np.testing.assert_array_equal(icon, normalized[y - 3:y + 109, x - 3:x + 109])
+        np.testing.assert_array_equal(icon[3:109, 3:109], normalized[y:y + 106, x:x + 106])
+    if name == "reward.png" and size == (1280, 720):
+        first = cv2.imdecode(np.frombuffer(snapshot.drops[0].icon_png, np.uint8), cv2.IMREAD_COLOR)
+        np.testing.assert_array_equal(first, source[152:264, 57:169])
+        # The red hidden-item bar starts at y266, outside the displayed card.
+        assert 152 + first.shape[0] < 266
+
+
+def test_display_changes_do_not_split_identity_or_reuse_old_card_pixels():
+    reader = LootReader()
+    source = load()
+    before = reader.read(source)
+    changed = source.copy()
+    changed[232:255, 68:156] = source[232:255, 185:273]
+    changed[172:197, 127:152] = (255, 0, 0)
+    after = reader.read(changed)
+    assert before.drops[0].quantity == 2
+    assert after.drops[0].quantity == 1
+    assert after.drops[0].item_id == before.drops[0].item_id
+    assert after.drops[0].icon_png != before.drops[0].icon_png
+
+
 @pytest.mark.parametrize("size", [(960, 540), (1920, 1080)])
 def test_resolution_mapping_preserves_items_and_counts(reader, size):
     reference = reader.read(load())
