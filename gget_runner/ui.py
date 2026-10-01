@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 import queue
 import threading
@@ -12,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from .adb import AdbClient
+from .loot import LootLedger, LootReader
 from .runner import BotRunner, RunConfig
 from .settings import AppSettings, MAX_ROUNDS, load_settings, save_settings
 from .vision import ScreenDetector
@@ -43,24 +45,25 @@ class RunnerWindow:
         self._target = saved.rounds
         self._infinite_run = saved.infinite
         self._device_labels: dict[str, str] = {}
-        self._frame_image: Image.Image | None = None
-        self._photo: ImageTk.PhotoImage | None = None
-        self._resize_job: str | None = None
+        self.loot_ledger = LootLedger()
+        self._loot_icons: dict[str, ImageTk.PhotoImage] = {}
         self.adb_path = tk.StringVar(root, saved.adb_path)
         self.device = tk.StringVar(root, saved.device)
         self.rounds = tk.StringVar(root, str(saved.rounds))
         self.infinite = tk.BooleanVar(root, saved.infinite)
         self.status = tk.StringVar(root, "待开始")
-        self.page = tk.StringVar(root, "尚未读取游戏画面")
+        self.page = tk.StringVar(root, "尚未检查游戏页面")
         self.count = tk.StringVar(root, "已完成 0 次")
-        self.preview_info = tk.StringVar(root, "点击「读取画面」检查设备和当前游戏页面")
+        self.coin_total = tk.StringVar(root, "金币累计：0")
+        self.loot_rounds = tk.StringVar(root, "统计轮数：0")
+        self.warning_rounds = tk.StringVar(root, "待确认轮数：0")
         self._build()
         self.rounds.trace_add("write", lambda *_args: self._mode_changed())
         self._update_count()
         self._update_controls()
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(80, self._drain_events)
-        self._log("请先开启游戏 AUTO，手动选择关卡，再刷新设备并读取画面。")
+        self._log("请先开启游戏 AUTO，手动选择关卡，再刷新设备并检查页面。")
 
     def _build(self) -> None:
         root = self.root
@@ -82,6 +85,7 @@ class RunnerWindow:
         style.configure("TCheckbutton", background="#f3f5f8", font=("Microsoft YaHei", 10))
         style.configure("TLabelframe", background="#f3f5f8", bordercolor="#d8e0eb")
         style.configure("TLabelframe.Label", background="#f3f5f8", foreground="#425572", font=("Microsoft YaHei", 10, "bold"))
+        style.configure("Loot.Treeview", rowheight=44, font=("Microsoft YaHei", 10))
         body = ttk.Frame(root, padding=(24, 18))
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
@@ -125,7 +129,7 @@ class RunnerWindow:
         self.resume_button.pack(side="left", padx=(8, 0))
         self.stop_button = ttk.Button(controls, text="停止", command=self._stop)
         self.stop_button.pack(side="left", padx=(8, 0))
-        self.read_button = ttk.Button(controls, text="读取画面（不点击）", command=self._read_screen)
+        self.read_button = ttk.Button(controls, text="检查页面（不点击）", command=self._read_screen)
         self.read_button.pack(side="right")
 
         content = ttk.Frame(body)
@@ -133,14 +137,28 @@ class RunnerWindow:
         content.columnconfigure(0, weight=3)
         content.columnconfigure(1, weight=2)
         content.rowconfigure(0, weight=1)
-        preview = ttk.LabelFrame(content, text="游戏画面", padding=10)
-        preview.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
-        preview.columnconfigure(0, weight=1)
-        preview.rowconfigure(0, weight=1)
-        self.canvas = tk.Canvas(preview, bg="#162337", highlightthickness=0, width=560, height=315)
-        self.canvas.grid(row=0, column=0, sticky="nsew")
-        self.canvas.bind("<Configure>", self._schedule_preview)
-        ttk.Label(preview, textvariable=self.preview_info, style="Muted.TLabel", wraplength=540).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        loot_panel = ttk.LabelFrame(content, text="战利品统计", padding=10)
+        loot_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        loot_panel.columnconfigure(0, weight=1)
+        loot_panel.rowconfigure(1, weight=1)
+        metrics = ttk.Frame(loot_panel)
+        metrics.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        for value in (self.coin_total, self.loot_rounds, self.warning_rounds):
+            ttk.Label(metrics, textvariable=value).pack(side="left", padx=(0, 18))
+        self.loot_tree = ttk.Treeview(loot_panel, columns=("name", "last", "total", "rounds"),
+                                     show="tree headings", style="Loot.Treeview", height=6)
+        self.loot_tree.heading("#0", text="图标")
+        self.loot_tree.column("#0", width=54, minwidth=48, stretch=False)
+        for key, title, width in (("name", "名称", 118), ("last", "本轮数量", 90),
+                                   ("total", "累计数量", 100), ("rounds", "出现轮数", 90)):
+            self.loot_tree.heading(key, text=title)
+            self.loot_tree.column(key, width=width, minwidth=width, anchor="w" if key == "name" else "center")
+        self.loot_tree.grid(row=1, column=0, sticky="nsew")
+        loot_scroll = ttk.Scrollbar(loot_panel, orient="vertical", command=self.loot_tree.yview)
+        loot_scroll.grid(row=1, column=1, sticky="ns")
+        self.loot_tree.configure(yscrollcommand=loot_scroll.set)
+        ttk.Label(loot_panel, text="仅统计本次挑战新获得的战利品；无法确认的数量显示「待确认」。",
+                  style="Muted.TLabel", wraplength=510).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         side = ttk.Frame(content)
         side.grid(row=0, column=1, sticky="nsew")
@@ -171,6 +189,8 @@ class RunnerWindow:
         threading.Thread(target=target, daemon=True).start()
 
     def _post(self, kind: str, payload=None) -> None:
+        if kind == "runner" and payload.kind == "frame":
+            return
         if not self._closing:
             self.events.put((kind, payload))
 
@@ -245,7 +265,7 @@ class RunnerWindow:
             messagebox.showerror("连接设置", str(exc), parent=self.root)
             return
         self._utility_busy = True
-        self.status.set("正在读取画面…")
+        self.status.set("正在检查页面…")
         self._update_controls()
         def work():
             try:
@@ -255,9 +275,9 @@ class RunnerWindow:
                 detector = ScreenDetector(self.project_root / "assets" / "profiles" / "default")
                 detection = detector.detect(frame)
                 self._persist(settings)
-                self._post("inspection", (frame, detection, foreground))
+                self._post("inspection", (detection, foreground))
             except Exception as exc:
-                self._post("utility_error", f"读取画面失败：{exc}")
+                self._post("utility_error", f"检查页面失败：{exc}")
         self._background(work)
 
     def _start(self) -> None:
@@ -272,6 +292,9 @@ class RunnerWindow:
         self._paused = self._stopping = self._control_pending = False
         self._completed = 0
         self._run_error = False
+        self.loot_ledger.reset()
+        self._loot_icons.clear()
+        self._update_loot()
         self._target, self._infinite_run = settings.rounds, settings.infinite
         self._cancel.clear()
         self.status.set("正在检查连接…")
@@ -287,7 +310,9 @@ class RunnerWindow:
                 detector = ScreenDetector(self.project_root / "assets" / "profiles" / "default")
                 config = RunConfig(rounds=settings.rounds, infinite=settings.infinite,
                                    diagnostics_dir=self.project_root / "logs")
-                runner = BotRunner(adb, detector, config, lambda event: self._post("runner", event))
+                reader = LootReader()
+                runner = BotRunner(adb, detector, config, lambda event: self._post("runner", event),
+                                   loot_reader=reader)
                 with self._runner_lock:
                     if self._cancel.is_set():
                         self._post("start_cancelled")
@@ -363,28 +388,27 @@ class RunnerWindow:
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
-    def _show_frame(self, frame) -> None:
-        self._frame_image = Image.fromarray(frame[:, :, ::-1].copy())
-        self.preview_info.set(f"{frame.shape[1]} × {frame.shape[0]} · 更新于 {datetime.now():%H:%M:%S}")
-        self._render_preview()
-
-    def _schedule_preview(self, _event=None) -> None:
-        if self._resize_job is not None:
-            self.root.after_cancel(self._resize_job)
-        self._resize_job = self.root.after(70, self._render_preview)
-
-    def _render_preview(self) -> None:
-        self._resize_job = None
-        width, height = max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height())
-        self.canvas.delete("all")
-        if self._frame_image is None:
-            self.canvas.create_text(width / 2, height / 2, text="游戏截图将在这里显示", fill="#b7c6dc",
-                                    font=("Microsoft YaHei", 13))
-            return
-        image = self._frame_image.copy()
-        image.thumbnail((width, height), Image.Resampling.LANCZOS)
-        self._photo = ImageTk.PhotoImage(image, master=self.root)
-        self.canvas.create_image(width / 2, height / 2, image=self._photo, anchor="center")
+    def _update_loot(self) -> None:
+        self.coin_total.set(f"金币累计：{self.loot_ledger.coin_total:,}")
+        self.loot_rounds.set(f"统计轮数：{self.loot_ledger.rounds}")
+        self.warning_rounds.set(f"待确认轮数：{self.loot_ledger.warning_rounds}")
+        children = self.loot_tree.get_children()
+        if children:
+            self.loot_tree.delete(*children)
+        for row in self.loot_ledger.rows:
+            if row.icon_png and row.item_id not in self._loot_icons:
+                try:
+                    with Image.open(BytesIO(row.icon_png)) as source:
+                        icon = source.convert("RGBA")
+                    icon.thumbnail((36, 36), Image.Resampling.LANCZOS)
+                    self._loot_icons[row.item_id] = ImageTk.PhotoImage(icon, master=self.root)
+                except (OSError, ValueError):
+                    pass
+            last = "待确认" if row.last_quantity is None else str(row.last_quantity)
+            total = f"{row.total_quantity:,}" + (" + 待确认" if row.unknown_rounds else "")
+            self.loot_tree.insert("", "end", iid=row.item_id,
+                                  image=self._loot_icons.get(row.item_id, ""),
+                                  values=(row.name, last, total, row.rounds))
 
     def _end_run(self, message: str) -> None:
         self._active = self._paused = self._stopping = self._control_pending = False
@@ -394,8 +418,14 @@ class RunnerWindow:
         self._update_controls()
 
     def _runner_event(self, event) -> None:
-        if event.frame is not None:
-            self._show_frame(event.frame)
+        if event.kind == "frame":
+            return
+        if event.kind == "loot" and event.loot is not None:
+            if not self.loot_ledger.record_round(event.completed, event.loot):
+                return
+            self._update_loot()
+            for warning in event.loot.warnings:
+                self._log("战利品待确认：" + warning)
         if event.state:
             self.page.set("当前页面：" + STATE_LABELS.get(event.state, event.state))
         self._completed = event.completed
@@ -455,12 +485,11 @@ class RunnerWindow:
             self._log(f"找到 {len(values)} 台在线设备" + ("；不可用：" + "、".join(unavailable) if unavailable else ""))
             self._update_controls()
         elif kind == "inspection":
-            frame, detection, foreground = payload
-            self._show_frame(frame)
+            detection, foreground = payload
             label = STATE_LABELS.get(detection.state, "未识别页面")
             self.page.set("当前页面：" + label)
             self._utility_busy = False
-            self.status.set("画面已读取" if foreground else "游戏未在前台")
+            self.status.set("页面已检查" if foreground else "游戏未在前台")
             self._log(f"只读检查：{label}；识别匹配 {detection.confidence:.0%}；" + ("游戏在前台" if foreground else "请返回游戏并处理弹窗"))
             self._update_controls()
         elif kind == "utility_error":
@@ -473,7 +502,7 @@ class RunnerWindow:
         if self._closing:
             return
         try:
-            # A bounded batch keeps resize/close controls responsive.
+            # A bounded batch keeps controls and closing responsive.
             for _ in range(60):
                 try:
                     kind, payload = self.events.get_nowait()

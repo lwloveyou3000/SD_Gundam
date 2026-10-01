@@ -59,6 +59,8 @@ def command_line(args: argparse.Namespace) -> int:
         return 0 if result.state else 2
 
     config = RunConfig(rounds=args.rounds, infinite=args.infinite, diagnostics_dir=ROOT / "logs")
+    from gget_runner.loot import LootLedger, LootReader
+    loot_ledger = LootLedger()
     event_records = []
     errors = []
     trace_counts = {}
@@ -76,19 +78,27 @@ def command_line(args: argparse.Namespace) -> int:
             return
         item = {"time": time.strftime("%H:%M:%S"), "kind": event.kind,
                 "message": event.message, "state": event.state, "completed": event.completed}
+        if event.kind == "loot" and event.loot is not None:
+            loot_ledger.record_round(event.completed, event.loot)
+            item["loot"] = event.loot.to_dict()
         event_records.append(item)
         print(json.dumps(item, ensure_ascii=False), flush=True)
         if event.kind == "error":
             errors.append(event.message)
 
-    runner = BotRunner(adb, detector, config, receive)
+    runner = BotRunner(adb, detector, config, receive, loot_reader=LootReader())
     signal.signal(signal.SIGINT, lambda *_: runner.stop())
     runner.run()
     log_dir = ROOT / "logs"
     log_dir.mkdir(exist_ok=True)
     report_path = log_dir / f"run-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    loot_totals = [{"item_id": row.item_id, "name": row.name, "total_quantity": row.total_quantity,
+                    "last_quantity": row.last_quantity, "rounds": row.rounds,
+                    "unknown_rounds": row.unknown_rounds} for row in loot_ledger.rows]
     report_path.write_text(json.dumps({"completed": runner.completed, "target": args.rounds,
                                        "infinite": args.infinite, "errors": errors,
+                                       "loot": {"rounds": loot_ledger.rounds, "coin_total": loot_ledger.coin_total,
+                                                "warning_rounds": loot_ledger.warning_rounds, "items": loot_totals},
                                        "events": event_records}, ensure_ascii=False, indent=2), encoding="utf-8")
     return 1 if errors else 0
 

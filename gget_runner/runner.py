@@ -9,12 +9,15 @@ import math
 from pathlib import Path
 import threading
 import time
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from .vision import Detection
+
+if TYPE_CHECKING:
+    from .loot import LootSnapshot
 
 
 LABELS = {"prepare": "关卡准备", "sortie": "出击准备", "battle_intro": "战斗开始", "battle": "自动战斗中",
@@ -55,14 +58,16 @@ class RunEvent:
     state: str = ""
     completed: int = 0
     frame: np.ndarray | None = None
+    loot: LootSnapshot | None = None
 
 
 class BotRunner:
-    def __init__(self, adb, detector, config: RunConfig, on_event: Callable[[RunEvent], None]):
+    def __init__(self, adb, detector, config: RunConfig, on_event: Callable[[RunEvent], None], loot_reader=None):
         self.adb = adb
         self.detector = detector
         self.config = config
         self.on_event = on_event
+        self.loot_reader = loot_reader
         self._condition = threading.Condition(threading.RLock())
         self._stop = threading.Event()
         self._pause = threading.Event()
@@ -83,9 +88,9 @@ class BotRunner:
     def paused(self) -> bool:
         return self._pause.is_set() and self.running
 
-    def _event(self, kind: str, message: str = "", frame=None) -> None:
+    def _event(self, kind: str, message: str = "", frame=None, loot=None) -> None:
         try:
-            self.on_event(RunEvent(kind, message, self._state, self.completed, frame))
+            self.on_event(RunEvent(kind, message, self._state, self.completed, frame, loot))
         except Exception:
             # A closing GUI or observer failure must never leave a click loop alive.
             self._stop.set()
@@ -258,6 +263,18 @@ class BotRunner:
                         self.completed += 1
                         battle_active = False
                         expected = "battle_intro"
+                        if self.loot_reader is not None:
+                            try:
+                                loot = self.loot_reader.read(frame)
+                            except Exception as loot_error:
+                                from .loot import LootSnapshot
+                                loot = LootSnapshot(warnings=(f"本轮战利品识别失败：{loot_error}",))
+                            if not loot.drops and not loot.warnings:
+                                from .loot import LootSnapshot
+                                loot = LootSnapshot(warnings=("本轮未能读取战利品，数量待确认",))
+                            self._event("loot", loot=loot)
+                            for warning in loot.warnings:
+                                self._event("log", warning)
                         self._event("progress", f"已完成 {self.completed} 次")
                         if not self.config.infinite and self.completed >= self.config.rounds:
                             result_message = f"已完成目标 {self.completed} 次，停在奖励页面"

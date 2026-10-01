@@ -64,7 +64,7 @@ def config(tmp_path, **changes):
                              diagnostics_dir=tmp_path), **changes)
 
 
-def make_runner(tmp_path, pages, callback=None, **changes):
+def make_runner(tmp_path, pages, callback=None, loot_reader=None, **changes):
     adb = FakeAdb(pages)
     events = []
 
@@ -73,7 +73,7 @@ def make_runner(tmp_path, pages, callback=None, **changes):
         if callback:
             callback(event)
 
-    runner = BotRunner(adb, FakeDetector(), config(tmp_path, **changes), on_event)
+    runner = BotRunner(adb, FakeDetector(), config(tmp_path, **changes), on_event, loot_reader=loot_reader)
     return runner, adb, events
 
 
@@ -97,6 +97,94 @@ def test_two_rounds_stale_reward_and_intro_do_not_double_click(tmp_path):
     assert adb.taps.count(TAPS["battle_intro"]) == 2
     assert [e.completed for e in events if e.kind == "progress"] == [1, 2]
     assert not any(e.kind == "error" for e in events)
+
+
+class FakeLootReader:
+    def __init__(self, snapshot=None, error=None):
+        from gget_runner.loot import LootDrop, LootSnapshot
+        self.snapshot = snapshot if snapshot is not None else LootSnapshot((
+            LootDrop("coin", "金币", 2000, b""),
+            LootDrop("item-01", "道具01", 2, b""),
+        ))
+        self.error = error
+        self.reads = []
+
+    def read(self, frame):
+        self.reads.append(PAGES[int(frame[0, 0, 0])])
+        if self.error:
+            raise self.error
+        return self.snapshot
+
+
+def test_final_reward_is_read_before_target_finishes(tmp_path):
+    reader = FakeLootReader()
+    runner, adb, events = make_runner(tmp_path, cycle(), loot_reader=reader)
+    runner.run()
+    assert reader.reads == ["reward"]
+    loot_events = [event for event in events if event.kind == "loot"]
+    assert len(loot_events) == 1 and loot_events[0].completed == 1
+    assert loot_events[0].loot is reader.snapshot
+    assert next(i for i, event in enumerate(events) if event.kind == "loot") < next(
+        i for i, event in enumerate(events) if event.kind == "finished")
+    assert TAPS["reward"] not in adb.taps
+
+
+def test_stale_rewards_only_count_each_battle_once(tmp_path):
+    from gget_runner.loot import LootLedger
+    reader, ledger = FakeLootReader(), LootLedger()
+
+    def receive(event):
+        if event.kind == "loot":
+            assert ledger.record_round(event.completed, event.loot)
+
+    pages = cycle() + repeated("reward", copies=6) + cycle(False)
+    runner, _, events = make_runner(tmp_path, pages, receive, loot_reader=reader, rounds=2)
+    runner.run()
+    assert reader.reads == ["reward", "reward"]
+    assert [event.completed for event in events if event.kind == "loot"] == [1, 2]
+    assert ledger.rounds == 2 and ledger.coin_total == 4000
+    assert {row.item_id: row.total_quantity for row in ledger.rows} == {"coin": 4000, "item-01": 4}
+
+
+def test_loot_read_failure_marks_round_and_allows_next_battle(tmp_path):
+    reader = FakeLootReader(error=RuntimeError("OCR unavailable"))
+    runner, adb, events = make_runner(tmp_path, cycle() + cycle(False), loot_reader=reader, rounds=2)
+    runner.run()
+    assert runner.completed == 2 and adb.taps.count(TAPS["reward"]) == 1
+    loot_events = [event for event in events if event.kind == "loot"]
+    assert len(loot_events) == 2
+    assert all(event.loot.drops == () and "OCR unavailable" in event.loot.warnings[0]
+               for event in loot_events)
+    assert not any(event.kind == "error" for event in events)
+
+
+def test_empty_loot_read_is_marked_as_unconfirmed(tmp_path):
+    from gget_runner.loot import LootLedger, LootSnapshot
+    reader = FakeLootReader(snapshot=LootSnapshot())
+    runner, _, events = make_runner(tmp_path, cycle(), loot_reader=reader)
+    runner.run()
+    loot = next(event.loot for event in events if event.kind == "loot")
+    ledger = LootLedger()
+    ledger.record_round(1, loot)
+    assert ledger.rounds == 1 and ledger.warning_rounds == 1
+    assert ledger.coin_total == 0 and loot.warnings
+
+
+def test_stop_on_loot_does_not_repeat_but_retains_earned_items(tmp_path):
+    from gget_runner.loot import LootLedger
+    reader, ledger = FakeLootReader(), LootLedger()
+    runner = None
+
+    def receive(event):
+        if event.kind == "loot":
+            ledger.record_round(event.completed, event.loot)
+            runner.stop()
+
+    runner, adb, events = make_runner(tmp_path, cycle(), receive, loot_reader=reader, infinite=True)
+    runner.run()
+    assert runner.completed == ledger.rounds == 1
+    assert ledger.coin_total == 2000 and TAPS["reward"] not in adb.taps
+    assert events[-1].message == "已停止"
 
 
 def test_infinite_stops_only_on_explicit_request(tmp_path):
