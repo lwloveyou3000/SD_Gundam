@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import pytest
 
-from gget_runner.adb import AdbClient, AdbError, GAME_PACKAGE
+from gget_runner.adb import AdbClient, AdbError, AdbTimeoutError, GAME_PACKAGE
 from gget_runner.runner import BotRunner, RunConfig
 from gget_runner.vision import Detection, ScreenDetector
 
@@ -449,6 +449,175 @@ def test_foreground_loss_before_tap_prevents_input(tmp_path):
     runner.run()
     assert adb.taps == []
     assert any(e.kind == "error" and "前台" in e.message for e in events)
+
+
+def scripted_focus(adb, outcomes):
+    answers = iter(outcomes)
+    def check():
+        adb.checks += 1
+        outcome = next(answers, True)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+    adb.is_game_foreground = check
+
+
+def test_foreground_polling_is_reduced_but_every_tap_is_checked(tmp_path):
+    runner, adb, events = make_runner(tmp_path, cycle())
+    runner.run()
+    assert runner.completed == 1
+    assert adb.checks == len(adb.taps) + 1
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_foreground_timeout_recovers_without_using_the_old_prepare_frame(tmp_path):
+    pages = repeated('prepare', 'battle', 'score', 'experience', 'reward')
+    runner, adb, events = make_runner(tmp_path, pages)
+    scripted_focus(adb, [True, AdbTimeoutError('window timeout'), True])
+    runner.run()
+    assert runner.completed == 1
+    assert adb.taps == [TAPS['score'], TAPS['experience']]
+    assert any('前台检查超时' in event.message for event in events)
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_consecutive_foreground_timeouts_stop_after_three_checks(tmp_path):
+    runner, adb, events = make_runner(tmp_path, cycle())
+    scripted_focus(adb, [AdbTimeoutError('window timeout')] * 3)
+    runner.run()
+    assert adb.checks == 3 and not adb.taps and runner.completed == 0
+    assert any(event.kind == 'error' and '连续3次' in event.message for event in events)
+
+
+def test_reward_repeat_foreground_timeout_does_not_count_rewards_twice(tmp_path):
+    runner, adb, events = make_runner(tmp_path, cycle() + repeated('reward', copies=4) + cycle(False), rounds=2)
+    # Initial check, five first-round taps, then the repeat's focus check fails.
+    scripted_focus(adb, [True] * 6 + [AdbTimeoutError('window timeout'), True])
+    runner.run()
+    assert runner.completed == 2 and adb.taps.count(TAPS['reward']) == 1
+    assert [event.completed for event in events if event.kind == 'progress'] == [1, 2]
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_stop_during_foreground_timeout_recovery_sends_no_input(tmp_path):
+    runner = None
+    def callback(event):
+        if '前台检查超时' in event.message:
+            runner.stop()
+    runner, adb, events = make_runner(tmp_path, cycle(), callback, poll_interval=10)
+    scripted_focus(adb, [AdbTimeoutError('window timeout')])
+    runner.run()
+    assert adb.checks == 1 and not adb.taps
+    assert events[-1].message == '已停止'
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_pause_during_foreground_recovery_resumes_with_a_new_check(tmp_path):
+    signal = threading.Event()
+    runner = None
+    def callback(event):
+        if '前台检查超时' in event.message:
+            runner.pause()
+        elif event.kind == 'paused':
+            signal.set()
+    runner, adb, events = make_runner(tmp_path, cycle(), callback)
+    scripted_focus(adb, [AdbTimeoutError('window timeout'), True])
+    runner.start()
+    assert signal.wait(1) and runner.paused and not adb.taps
+    runner.resume()
+    runner.join(1)
+    assert not runner.running and runner.completed == 1
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_foreground_recovery_does_not_consume_the_page_watchdog(tmp_path, monkeypatch):
+    from gget_runner import runner as runner_module
+    clock = [1000.0]
+    monkeypatch.setattr(runner_module.time, 'monotonic', lambda: clock[0])
+    runner, adb, events = make_runner(tmp_path, cycle(), transition_timeout=.05, battle_timeout=.05)
+    runner._sleep = lambda: clock.__setitem__(0, clock[0] + .001)
+    def check():
+        adb.checks += 1
+        if adb.checks == 1:
+            clock[0] += 10
+            raise AdbTimeoutError('window timeout')
+        return True
+    adb.is_game_foreground = check
+    runner.run()
+    assert runner.completed == 1
+    assert not any(event.kind == 'error' for event in events)
+
+
+@pytest.mark.parametrize('outcome', [False, AdbTimeoutError('window timeout')])
+def test_stop_while_foreground_query_is_in_flight_does_not_report_an_error(tmp_path, outcome):
+    runner, adb, events = make_runner(tmp_path, cycle())
+    def check():
+        adb.checks += 1
+        runner.stop()
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+    adb.is_game_foreground = check
+    runner.run()
+    assert not adb.taps and events[-1].message == '已停止'
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_second_reward_repeat_timeout_recovers_before_watchdog_check(tmp_path, monkeypatch):
+    from gget_runner import runner as runner_module
+    clock = [1000.0]
+    monkeypatch.setattr(runner_module.time, 'monotonic', lambda: clock[0])
+    pages = cycle() + repeated('reward', copies=6) + cycle(False)
+    runner, adb, events = make_runner(tmp_path, pages, rounds=2, transition_timeout=.05, battle_timeout=.05)
+    runner._sleep = lambda: clock.__setitem__(0, clock[0] + .001)
+    def check():
+        adb.checks += 1
+        if adb.checks in (7, 9):
+            clock[0] += 10
+            raise AdbTimeoutError('window timeout')
+        return True
+    adb.is_game_foreground = check
+    runner.run()
+    assert runner.completed == 2 and adb.taps.count(TAPS['reward']) == 1
+    assert [event.completed for event in events if event.kind == 'progress'] == [1, 2]
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_pause_during_a_slow_foreground_query_preserves_the_watchdog(tmp_path, monkeypatch):
+    from gget_runner import runner as runner_module
+    clock = [1000.0]
+    monkeypatch.setattr(runner_module.time, 'monotonic', lambda: clock[0])
+    signal = threading.Event()
+    def callback(event):
+        if event.kind == 'paused':
+            signal.set()
+    runner, adb, events = make_runner(tmp_path, cycle(), callback, transition_timeout=.05, battle_timeout=.05)
+    runner._sleep = lambda: clock.__setitem__(0, clock[0] + .001)
+    def check():
+        adb.checks += 1
+        if adb.checks == 1:
+            clock[0] += 10
+            runner.pause()
+        return True
+    adb.is_game_foreground = check
+    runner.start()
+    assert signal.wait(1) and runner.paused and not adb.taps
+    clock[0] += 100
+    runner.resume()
+    runner.join(1)
+    assert not runner.running and runner.completed == 1
+    assert not any(event.kind == 'error' for event in events)
+
+
+def test_input_timeout_is_never_retried(tmp_path):
+    runner, adb, events = make_runner(tmp_path, cycle())
+    def tap(x, y):
+        adb.taps.append((x, y))
+        raise AdbTimeoutError('input outcome unknown')
+    adb.tap = tap
+    runner.run()
+    assert adb.taps == [TAPS['prepare']]
+    assert any(event.kind == 'error' and 'input outcome unknown' in event.message for event in events)
 
 
 def test_start_twice_rejected_and_stop_interrupts_long_poll(tmp_path):

@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from .vision import Detection
+from .adb import AdbTimeoutError
 
 if TYPE_CHECKING:
     from .loot import LootSnapshot
@@ -37,13 +38,14 @@ class RunConfig:
     transition_timeout: float = 60.0
     battle_timeout: float = 900.0
     diagnostics_dir: Path = Path("logs")
+    foreground_interval: float = 5.0
 
     def __post_init__(self):
         if isinstance(self.rounds, bool) or not isinstance(self.rounds, int) or self.rounds < 1:
             raise ValueError("目标次数必须是正整数")
         if isinstance(self.stable_frames, bool) or not isinstance(self.stable_frames, int) or self.stable_frames < 2:
             raise ValueError("至少需要连续两帧确认页面")
-        for name in ("poll_interval", "transition_timeout", "battle_timeout"):
+        for name in ("poll_interval", "transition_timeout", "battle_timeout", "foreground_interval"):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} 必须大于 0")
@@ -78,6 +80,10 @@ class BotRunner:
         self._last_frame: np.ndarray | None = None
         self._last_detection: Detection | None = None
         self._pending_events: deque[tuple[str, str]] = deque()
+        self._foreground_checked_at = -math.inf
+        self._foreground_timeouts = 0
+        self._foreground_recovery_started: float | None = None
+        self._foreground_recovery_elapsed = 0.0
 
     @property
     def running(self) -> bool:
@@ -107,6 +113,10 @@ class BotRunner:
         self._last_frame = None
         self._last_detection = None
         self._pending_events.clear()
+        self._foreground_checked_at = -math.inf
+        self._foreground_timeouts = 0
+        self._foreground_recovery_started = None
+        self._foreground_recovery_elapsed = 0.0
 
     def start(self) -> None:
         with self._condition:
@@ -171,13 +181,51 @@ class BotRunner:
         if detection.tap is None:
             raise RuntimeError("识别页面没有安全点击位置")
         # Recheck immediately before input, even if capture happened seconds ago.
-        if not self.adb.is_game_foreground():
+        foreground = self._check_foreground(force=True)
+        if foreground is None:
+            return False
+        if not foreground:
             raise RuntimeError("游戏不在前台，已停止点击")
         with self._condition:
             if self._stop.is_set() or self._pause.is_set():
                 return False
             self.adb.tap(*detection.tap)
         return True
+
+    def _check_foreground(self, *, force: bool = False) -> bool | None:
+        if self._stop.is_set() or self._pause.is_set():
+            return None
+        if not force and not self._foreground_timeouts and time.monotonic() - self._foreground_checked_at < self.config.foreground_interval:
+            return True
+        query_started = time.monotonic()
+        try:
+            foreground = self.adb.is_game_foreground()
+        except AdbTimeoutError as exc:
+            self._foreground_checked_at = -math.inf
+            if self._stop.is_set():
+                return None
+            if self._foreground_recovery_started is None:
+                self._foreground_recovery_started = query_started
+            if self._pause.is_set():
+                return None
+            self._foreground_timeouts += 1
+            if self._foreground_timeouts >= 3:
+                raise AdbTimeoutError(f"前台检查连续3次超时，已停止：{exc}") from exc
+            self._event("log", f"前台检查超时（{self._foreground_timeouts}/3），重新确认页面后再操作")
+            return None
+        if self._stop.is_set():
+            return None
+        if self._pause.is_set():
+            self._foreground_checked_at = -math.inf
+            if self._foreground_recovery_started is None:
+                self._foreground_recovery_started = query_started
+            return None
+        if self._foreground_recovery_started is not None:
+            self._foreground_recovery_elapsed += time.monotonic() - self._foreground_recovery_started
+            self._foreground_recovery_started = None
+        self._foreground_timeouts = 0
+        self._foreground_checked_at = time.monotonic() if foreground else -math.inf
+        return foreground
 
     def _diagnostic(self, reason: str) -> str:
         directory = Path(self.config.diagnostics_dir)
@@ -219,7 +267,17 @@ class BotRunner:
                     phase_started += pause_duration
                     last_action += pause_duration
                     stable_state, stable_count = None, 0
-                if not self.adb.is_game_foreground():
+                    self._foreground_checked_at = -math.inf
+                    if self._foreground_recovery_started is not None:
+                        self._foreground_recovery_started += pause_duration
+                foreground = self._check_foreground()
+                phase_started += self._foreground_recovery_elapsed
+                self._foreground_recovery_elapsed = 0.0
+                if foreground is None:
+                    stable_state, stable_count = None, 0
+                    self._sleep()
+                    continue
+                if not foreground:
                     raise RuntimeError("游戏不在前台，请返回游戏后重新启动")
                 frame = self.adb.screenshot()
                 self._last_frame = frame
@@ -288,6 +346,7 @@ class BotRunner:
                         if state == "reward":
                             expected = "reward_repeat"
                         stable_state, stable_count = None, 0
+                        self._sleep()
                         continue
                     self._event("log", f"已点击：{LABELS.get(state, state)}")
                     last_action = phase_started = time.monotonic()
@@ -301,6 +360,10 @@ class BotRunner:
                         expected = "battle_intro"
                         last_action = phase_started = time.monotonic()
                         stable_state, stable_count = None, 0
+                    else:
+                        stable_state, stable_count = None, 0
+                        self._sleep()
+                        continue
                 # An intro that never went away is a failed transition. A
                 # confirmed battle and its unrecognized animations get the
                 # longer watchdog without resetting it on every combat frame.

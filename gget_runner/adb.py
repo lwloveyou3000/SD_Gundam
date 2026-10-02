@@ -18,6 +18,10 @@ class AdbError(RuntimeError):
     """An ADB operation failed or returned unusable output."""
 
 
+class AdbTimeoutError(AdbError):
+    """The command's outcome is unknown; only read operations may be retried."""
+
+
 @dataclass(frozen=True)
 class Device:
     serial: str
@@ -36,7 +40,9 @@ def _command(adb_path: str | Path, arguments: list[str], timeout: float = 15.0) 
             check=False,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except subprocess.TimeoutExpired as exc:
+        raise AdbTimeoutError(f"ADB 执行失败：{exc}") from exc
+    except OSError as exc:
         raise AdbError(f"ADB 执行失败：{exc}") from exc
     if result.returncode:
         reason = result.stderr.decode("utf-8", errors="replace").strip()
