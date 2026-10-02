@@ -26,7 +26,7 @@ Remove canvas, full-game PhotoImage state, resize/render preview methods and fra
 
 Keep ADB controls and count controls unchanged. Start preflight constructs LootReader in the background and passes to runner. Stats must not be faked from a current already-open reward page. Native widget tests cover removed preview, duplicate events, aggregation and reset.
 
-The compact layout integrates status, completed counts, current page and progress into the two connection rows. The loot panel is 30% wider than its natural compact size, with expanding text columns, 31x31 card thumbnails and 38-pixel rows. Native tree selection and scrolling remain available; grid separators forward mouse input and refresh after scrolling or resizing. Name and numeric columns are centered, with minimum space for four Chinese name characters, seven-digit quantities and three-digit appearance counts. Remaining width and the full content height belong to the log panel.
+The compact layout integrates status, completed counts, current page and progress into the two connection rows. The loot panel is 30% wider than its natural compact size, with expanding text columns, 31x31 card thumbnails and 38-pixel rows. Native tree selection and scrolling remain available; grid separators forward mouse input and refresh after scrolling or resizing. Name and numeric columns are centered, with minimum space for four Chinese name characters and seven-digit quantities. The appearance-count and cumulative-quantity columns share the same rendered width. Remaining width and the full content height belong to the log panel.
 
 ## Evidence and limits
 

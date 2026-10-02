@@ -196,6 +196,17 @@ class RunnerWindow:
         self.log_text.configure(yscrollcommand=scrollbar.set)
         root.update_idletasks()
         content.columnconfigure(0, minsize=round(loot_panel.winfo_reqwidth() * 1.30) + 8)
+        def match_quantity_columns():
+            if self._closing or not self.loot_tree.winfo_exists():
+                return
+            quantity_width = self.loot_tree.column("total", "width")
+            for key in ("total", "rounds"):
+                self.loot_tree.column(key, width=quantity_width, stretch=False)
+            self.loot_tree.heading("rounds", text="出现轮次")
+            self.loot_tree.refresh_grid()
+        self.loot_tree.bind("<Map>", lambda _event: root.after_idle(match_quantity_columns), add="+")
+        if self.loot_tree.winfo_ismapped():
+            root.after_idle(match_quantity_columns)
 
     def _background(self, target) -> None:
         threading.Thread(target=target, daemon=True).start()
