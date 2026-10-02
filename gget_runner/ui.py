@@ -175,7 +175,7 @@ class RunnerWindow:
                                    ("total", "累计数量", "9,999,999"), ("rounds", "出现\n轮次", "999")):
             width = max(table_font.measure(sample), table_font.measure(title.split("\n")[0])) + 10
             self.loot_tree.heading(key, text=title, anchor="center")
-            self.loot_tree.column(key, width=width, minwidth=width, stretch=False, anchor="center")
+            self.loot_tree.column(key, width=width, minwidth=width, stretch=True, anchor="center")
         self.loot_tree.grid(row=1, column=0, sticky="nsew")
         loot_scroll = ttk.Scrollbar(loot_panel, orient="vertical", command=self.loot_tree.yview)
         loot_scroll.grid(row=1, column=1, sticky="ns")
@@ -194,6 +194,8 @@ class RunnerWindow:
         scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scrollbar.set)
+        root.update_idletasks()
+        content.columnconfigure(0, minsize=round(loot_panel.winfo_reqwidth() * 1.30) + 8)
 
     def _background(self, target) -> None:
         threading.Thread(target=target, daemon=True).start()
