@@ -76,6 +76,7 @@ class RunnerWindow:
         style = ttk.Style(root)
         style.theme_use("clam")
         style.configure("TFrame", background="#f3f5f8")
+        style.configure("StatusCell.TFrame", background="#f3f5f8", bordercolor="#b7c4d5")
         style.configure("TLabel", background="#f3f5f8", foreground="#273447", font=("Microsoft YaHei", 9))
         style.configure("Heading.TLabel", font=("Microsoft YaHei", 14, "bold"), foreground="#17365d")
         style.configure("Muted.TLabel", foreground="#65758a")
@@ -131,26 +132,37 @@ class RunnerWindow:
         self.device_combo.grid(row=1, column=1, sticky="ew", padx=(0, 6), pady=(6, 0))
         self.refresh_button = ttk.Button(setup, text="刷新", command=self._refresh_devices)
         self.refresh_button.grid(row=1, column=2, sticky="ew", padx=(0, 12), pady=(6, 0))
-        options = ttk.Frame(setup)
-        options.grid(row=0, column=3, sticky="w")
+        challenge = ttk.Frame(setup)
+        challenge.grid(row=0, column=3, rowspan=2, sticky="nsew")
+        for column in range(3):
+            challenge.columnconfigure(column, weight=1)
+        cells = {}
+        for row in range(2):
+            for column in range(3):
+                cell = ttk.Frame(challenge, style="StatusCell.TFrame", relief="solid", borderwidth=1,
+                                 padding=(6, 3))
+                cell.grid(row=row, column=column, sticky="nsew",
+                          padx=(0, 4) if column < 2 else 0, pady=(0, 6) if row == 0 else 0)
+                cells[row, column] = cell
+        options = ttk.Frame(cells[0, 0])
+        options.pack(anchor="center", expand=True)
         ttk.Label(options, text="次数").grid(row=0, column=0, padx=(0, 6))
         self.rounds_entry = ttk.Spinbox(options, from_=1, to=MAX_ROUNDS, width=6, textvariable=self.rounds)
         self.rounds_entry.grid(row=0, column=1)
         ttk.Label(options, text="次").grid(row=0, column=2, padx=(4, 8))
-        self.infinite_check = ttk.Checkbutton(options, text="无限循环", variable=self.infinite,
+        self.infinite_check = ttk.Checkbutton(cells[0, 1], text="无限循环", variable=self.infinite,
                                              command=self._mode_changed)
-        self.infinite_check.grid(row=0, column=3, sticky="w")
-        ttk.Label(options, text="有限次数停在奖励页", style="Muted.TLabel").grid(row=0, column=4, padx=(12, 0))
-        status_line = ttk.Frame(setup)
-        status_line.grid(row=1, column=3, sticky="ew", pady=(6, 0))
-        self.status_label = ttk.Label(status_line, textvariable=self.status, style="Status.TLabel", width=16)
-        self.status_label.grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.count_label = ttk.Label(status_line, textvariable=self.count, width=22)
-        self.count_label.grid(row=0, column=1, sticky="w", padx=(0, 6))
-        self.page_label = ttk.Label(status_line, textvariable=self.page, width=16, style="Muted.TLabel")
-        self.page_label.grid(row=0, column=2, sticky="w", padx=(0, 6))
-        self.progress = ttk.Progressbar(status_line, mode="determinate", maximum=1, length=56)
-        self.progress.grid(row=0, column=3, sticky="e")
+        self.infinite_check.pack(anchor="center", expand=True)
+        ttk.Label(cells[0, 2], text="有限次数停在奖励页", style="Muted.TLabel",
+                  anchor="center").pack(fill="x", expand=True)
+        self.status_label = ttk.Label(cells[1, 0], textvariable=self.status, style="Status.TLabel", width=16,
+                                     anchor="center")
+        self.status_label.pack(fill="x", expand=True)
+        self.count_label = ttk.Label(cells[1, 1], textvariable=self.count, width=22, anchor="center")
+        self.count_label.pack(fill="x", expand=True)
+        self.page_label = ttk.Label(cells[1, 2], textvariable=self.page, width=16, style="Muted.TLabel",
+                                   anchor="center")
+        self.page_label.pack(fill="x", expand=True)
 
         content = ttk.Frame(body)
         content.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
@@ -371,10 +383,8 @@ class RunnerWindow:
     def _update_count(self) -> None:
         if self._infinite_run:
             self.count.set(f"完成 {self._completed} 次 · 无限")
-            self.progress.configure(maximum=1, value=0)
         else:
             self.count.set(f"完成 {self._completed} / {self._target} 次")
-            self.progress.configure(maximum=max(1, self._target), value=self._completed)
 
     def _log(self, message: str) -> None:
         self.log_text.configure(state="normal")

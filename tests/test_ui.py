@@ -200,7 +200,7 @@ def test_main_controls_and_loot_fit_window(window, size):
     for control in (window.start_button, window.pause_button, window.resume_button,
                     window.stop_button, window.refresh_button, window.browse_button, window.path_entry,
                     window.rounds_entry, window.infinite_check, window.loot_tree, window.log_text,
-                    window.device_combo, window.runtime_hint, window.progress,
+                    window.device_combo, window.runtime_hint,
                     window.status_label, window.count_label, window.page_label):
         x, y = control.winfo_rootx() - root_x, control.winfo_rooty() - root_y
         assert x >= 0 and y >= 0
@@ -217,7 +217,7 @@ def test_main_controls_and_loot_fit_window(window, size):
     assert window.path_entry.winfo_rootx() == window.device_combo.winfo_rootx()
     assert window.log_text.winfo_width() > window.loot_tree.winfo_width()
     assert window.log_text.winfo_height() > window.loot_tree.winfo_height()
-    assert window.progress.master.master is window.path_entry.master
+    assert window.status_label.master.master.master is window.path_entry.master
     assert window.path_entry.master.grid_size()[1] == 2
     table_font = tkfont.Font(window.root, font=('Microsoft YaHei', 9))
     for column, sample in (('name', '汉字名称'), ('last', '9999999'),
