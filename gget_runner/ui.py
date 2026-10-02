@@ -18,6 +18,7 @@ from .runner import BotRunner, RunConfig
 from .settings import AppSettings, MAX_ROUNDS, load_settings, save_settings
 from .vision import ScreenDetector
 from .widgets import GridTreeview
+from .paths import RESOURCE_ROOT
 
 
 STATE_LABELS = {"prepare": "关卡准备", "sortie": "出击准备", "battle_intro": "战斗开始",
@@ -318,7 +319,7 @@ class RunnerWindow:
                 adb = AdbClient(settings.adb_path, settings.device)
                 if not adb.is_game_foreground():
                     raise RuntimeError("游戏不在前台；请返回游戏并处理弹窗后重新开始")
-                detector = ScreenDetector(self.project_root / "assets" / "profiles" / "default")
+                detector = ScreenDetector(RESOURCE_ROOT / "assets" / "profiles" / "default")
                 config = RunConfig(rounds=settings.rounds, infinite=settings.infinite,
                                    diagnostics_dir=self.project_root / "logs")
                 reader = LootReader()

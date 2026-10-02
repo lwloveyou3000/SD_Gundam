@@ -10,8 +10,18 @@ import sys
 import time
 import traceback
 
-ROOT = Path(__file__).resolve().parent
+from gget_runner.paths import DATA_ROOT, RESOURCE_ROOT
+
+ROOT = DATA_ROOT
 DEFAULT_ADB = r"F:\leidian\LDPlayer9\adb.exe"
+
+
+def save_frame(path: Path, frame) -> None:
+    import cv2
+    success, encoded = cv2.imencode(".png", frame)
+    if not success:
+        raise RuntimeError("无法保存诊断截图")
+    encoded.tofile(str(path))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -30,8 +40,6 @@ def command_line(args: argparse.Namespace) -> int:
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    import cv2
-
     from gget_runner.adb import AdbClient
     from gget_runner.runner import BotRunner, RunConfig
     from gget_runner.vision import ScreenDetector
@@ -44,14 +52,14 @@ def command_line(args: argparse.Namespace) -> int:
             raise RuntimeError("请连接一个模拟器，或用 --device 指定设备编号。")
         serial = connected[0].serial
     adb = AdbClient(args.adb, serial)
-    detector = ScreenDetector(ROOT / "assets" / "profiles" / "default")
+    detector = ScreenDetector(RESOURCE_ROOT / "assets" / "profiles" / "default")
     if args.check:
         frame = adb.screenshot()
         result = detector.detect(frame)
         log_dir = ROOT / "logs"
         log_dir.mkdir(exist_ok=True)
         screenshot_path = log_dir / "screen-check.png"
-        cv2.imwrite(str(screenshot_path), frame)
+        save_frame(screenshot_path, frame)
         print(json.dumps({"device": serial, "game_foreground": adb.is_game_foreground(),
                           "state": result.state, "confidence": result.confidence,
                           "tap": result.tap, "details": result.details,
@@ -73,7 +81,7 @@ def command_line(args: argparse.Namespace) -> int:
                 if index < 14:
                     trace_dir = ROOT / "logs" / "transition-frames"
                     trace_dir.mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(str(trace_dir / f"{event.completed}-{event.state}-{index:02d}.png"), event.frame)
+                    save_frame(trace_dir / f"{event.completed}-{event.state}-{index:02d}.png", event.frame)
                     trace_counts[key] = index + 1
             return
         item = {"time": time.strftime("%H:%M:%S"), "kind": event.kind,

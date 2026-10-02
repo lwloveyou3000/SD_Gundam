@@ -12,6 +12,7 @@ import re
 
 import cv2
 import numpy as np
+from .paths import RESOURCE_ROOT
 
 
 @dataclass(frozen=True)
@@ -117,7 +118,7 @@ class LootReader:
     _DISPLAY_FRAME_MARGIN = 3
 
     def __init__(self):
-        asset_dir = Path(__file__).resolve().parent.parent / "assets" / "loot"
+        asset_dir = RESOURCE_ROOT / "assets" / "loot"
         self._header = self._load(asset_dir / "reward-header.png", cv2.IMREAD_GRAYSCALE)
         self._acquired = self._load(asset_dir / "reward-acquired.png", cv2.IMREAD_GRAYSCALE)
         self._card_mask = self._load(asset_dir / "card-mask.png", cv2.IMREAD_GRAYSCALE)
