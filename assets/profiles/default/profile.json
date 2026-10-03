@@ -35,8 +35,8 @@
             0.42,
             0.12
           ],
-          "threshold": 0.72,
-          "method": "gray"
+          "threshold": 0.88,
+          "method": "white_text"
         }
       ]
     },
@@ -69,8 +69,8 @@
             0.43,
             0.12
           ],
-          "threshold": 0.72,
-          "method": "gray"
+          "threshold": 0.88,
+          "method": "white_text"
         }
       ]
     },

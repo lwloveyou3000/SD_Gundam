@@ -36,6 +36,14 @@ def _edge(gray: np.ndarray) -> np.ndarray:
     return cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 50, 140)
 
 
+def _white_text(frame: np.ndarray) -> np.ndarray:
+    """Keep bright, nearly neutral title strokes instead of their stage backdrop."""
+    colors = frame.astype(np.float32)
+    brightness = np.clip((colors.min(axis=2) - 180.0) / 50.0, 0.0, 1.0)
+    neutrality = np.clip((35.0 - np.ptp(colors, axis=2)) / 20.0, 0.0, 1.0)
+    return (brightness * neutrality * 255.0).astype(np.uint8)
+
+
 class ScreenDetector:
     def __init__(self, profile_dir: str | Path):
         self.profile_dir = Path(profile_dir).resolve()
@@ -81,8 +89,10 @@ class ScreenDetector:
                 if loaded is None:
                     raise ValueError(f"无法读取模板：{path}")
                 method = template.get("method", "gray")
-                if method not in {"gray", "edge"}:
+                if method not in {"gray", "edge", "white_text"}:
                     raise ValueError(f"不支持的匹配方法：{method}")
+                if method == "white_text" and (name not in {"prepare", "sortie"} or anchor_name != "header"):
+                    raise ValueError("white_text 只允许用于 prepare/sortie 的 header 文字模板")
                 roi = tuple(template["search_roi"])
                 if (len(roi) != 4 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in roi)
                         or roi[0] >= roi[2] or roi[1] >= roi[3]):
@@ -90,6 +100,8 @@ class ScreenDetector:
                 threshold = float(template.get("threshold", 0.85))
                 if not math.isfinite(threshold) or not 0 < threshold <= 1:
                     raise ValueError("匹配阈值必须介于 0 和 1 之间")
+                if method == "white_text" and threshold < 0.88:
+                    raise ValueError("white_text 的字形和前景亮度阈值不得低于 0.88")
                 variants = []
                 for scale in (0.90, 0.95, 1.0, 1.05, 1.10):
                     width = max(2, round(loaded.shape[1] * scale))
@@ -105,6 +117,10 @@ class ScreenDetector:
                             raise ValueError(f"边缘模板太小：{path.name}")
                         pixels = pixels[2:-2, 2:-2]
                         gray_pixels = gray_pixels[2:-2, 2:-2]
+                    elif method == "white_text":
+                        pixels = _white_text(resized)
+                        if np.count_nonzero(pixels >= 230) < 20:
+                            raise ValueError(f"模板没有足够的白色文字前景：{path.name}")
                     # Constant templates produce misleading perfect normalized matches.
                     if float(pixels.std()) < 1.0:
                         raise ValueError(f"模板没有足够的文字/边缘特征：{path.name}")
@@ -115,6 +131,10 @@ class ScreenDetector:
             if any(anchor.allow_pulse for anchor in anchors):
                 if sum(anchor.allow_pulse for anchor in anchors) != 1 or not any(not anchor.allow_pulse for anchor in anchors):
                     raise ValueError("脉冲文字只能设置一项，并且必须包含严格检查外观的其他页面标志")
+            if any(anchor.method == "white_text" for anchor in anchors):
+                if not any(anchor.name == "button" and anchor.method in {"gray", "edge"}
+                           and not anchor.allow_pulse for anchor in anchors):
+                    raise ValueError("white_text 标题必须包含严格检查外观的 button 模板")
             self.states.append({"name": name, "label": item.get("label", name), "tap": tap, "anchors": anchors})
         if not self.states:
             raise ValueError("配置没有任何页面模板")
@@ -129,6 +149,7 @@ class ScreenDetector:
         normalized = cv2.resize(bgr_frame, self.reference_size, interpolation=cv2.INTER_AREA if width > ref_width else cv2.INTER_LINEAR)
         gray = _gray(normalized)
         edges = None
+        white_text = None
         matches = []
         candidates = []
         for state in self.states:
@@ -138,7 +159,10 @@ class ScreenDetector:
             for anchor in state["anchors"]:
                 if anchor.method == "edge" and edges is None:
                     edges = _edge(gray)
-                source = edges if anchor.method == "edge" else gray
+                if anchor.method == "white_text" and white_text is None:
+                    white_text = _white_text(normalized)
+                source = (edges if anchor.method == "edge" else
+                          white_text if anchor.method == "white_text" else gray)
                 left, top, right, bottom = anchor.roi
                 x1, y1 = math.floor(left * ref_width), math.floor(top * ref_height)
                 x2, y2 = math.ceil(right * ref_width), math.ceil(bottom * ref_height)
@@ -164,7 +188,18 @@ class ScreenDetector:
                     mean_delta = float(gray_patch.mean()) - float(gray_template.mean())
                     luminance = max(0.0, 1.0 - abs(mean_delta) / 128.0)
                     visibility_ok = 0.4 <= ratio <= 1.8 and luminance >= 0.5
-                    if anchor.allow_pulse:
+                    foreground_luminance = None
+                    if anchor.method == "white_text":
+                        # The title backdrop belongs to the stage. Check only
+                        # bright stroke cores for unchanged foreground opacity;
+                        # normalized shape alone could accept a dimmed modal.
+                        foreground = template >= 230
+                        foreground_ratio = float(gray_patch[foreground].mean()) / max(
+                            float(gray_template[foreground].mean()), 1.0)
+                        foreground_luminance = min(foreground_ratio, 1.0 / foreground_ratio) if foreground_ratio > 0 else 0.0
+                        visibility_ok = foreground_luminance >= anchor.threshold
+                        score = min(correlation, foreground_luminance)
+                    elif anchor.allow_pulse:
                         # The intro's label pulses independently of its fixed
                         # AUTO/header. Retain text-shape matching and a visible
                         # contrast floor; every companion anchor remains strict.
@@ -174,6 +209,8 @@ class ScreenDetector:
                     metrics = {"correlation": round(float(correlation), 4), "contrast": round(contrast, 4),
                                "luminance": round(luminance, 4), "contrast_ratio": round(ratio, 4),
                                "mean_delta": round(mean_delta, 4), "visibility_ok": visibility_ok}
+                    if foreground_luminance is not None:
+                        metrics["foreground_luminance"] = round(foreground_luminance, 4)
                     if math.isfinite(correlation) and correlation > raw_best_correlation:
                         raw_best_correlation = correlation
                         raw_best = {**metrics, "score": round(float(score), 4), "scale": scale,
